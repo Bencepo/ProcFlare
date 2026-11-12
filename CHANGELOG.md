@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Clearcasting is now also found in combat, where Forever hides buff details from addons: by spell, by the game's own proc glow, or by your abilities becoming free.
+- No more "Auras cannot be accessed when secret" errors in combat.
+- Spells you cast yourself (e.g. Regrowth) no longer count as procs.
+
 ## 0.1.0
 
 - Clearcasting: big pulsing icon above your character as long as the buff is up, with remaining seconds, a sound and a short blue flash at the screen edges. Also alerts again when a new proc refreshes it.

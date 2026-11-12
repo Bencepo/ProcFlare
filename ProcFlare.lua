@@ -225,7 +225,8 @@ end
 local function showCC(a, alert)
 	local refreshed = ccState and ccState.id == a.auraInstanceID and a.expirationTime and ccState.expires
 		and a.expirationTime > ccState.expires + 0.5
-	local new = not ccState or ccState.id ~= a.auraInstanceID
+	-- -10: found while buff details are hidden, so the id is unknown
+	local new = not ccState or (ccState.id ~= a.auraInstanceID and ccState.id ~= -10 and a.auraInstanceID ~= -10)
 	ccState = { id = a.auraInstanceID, expires = a.expirationTime, count = a.applications }
 	if a.icon then cc.icon:SetTexture(a.icon) end
 	cc:Show()
@@ -266,48 +267,116 @@ end
 local driver = CreateFrame("Frame")
 driver:Hide()
 
+-- Reads one aura without ever touching hidden data: Forever hides most buff
+-- details from addons in combat, and reading them raises an error.
+-- Returns the aura, false for a hidden one, or nil at the end of the list.
+local function readAura(unit, index, filter)
+	if C_Secrets and C_Secrets.ShouldUnitAuraIndexBeSecret then
+		local ok, hidden = pcall(C_Secrets.ShouldUnitAuraIndexBeSecret, unit, index, filter)
+		if ok and hidden == true then return false end
+	end
+	local ok, a = pcall(C_UnitAuras.GetAuraDataByIndex, unit, index, filter)
+	if not ok then return false end
+	if not a then return nil end
+	if issecret(a.spellId) or issecret(a.auraInstanceID) or issecret(a.duration)
+		or issecret(a.expirationTime) or issecret(a.name) then
+		return false
+	end
+	return a
+end
+
+-- Spells you can cast yourself (e.g. Regrowth) are never procs.
+local function isOwnSpell(id)
+	if IsPlayerSpell and IsPlayerSpell(id) then return true end
+	if C_SpellBook and C_SpellBook.IsSpellKnown and C_SpellBook.IsSpellKnown(id) then return true end
+	return false
+end
+
+-- Clearcasting while buff details are hidden. Several ways, the first that works wins.
+local overlayCC = false -- the game's own proc glow reported Clearcasting
+local probeCost = {}    -- spell name -> highest cost seen
+local PROBES = {        -- spells whose cost drops to 0 with Clearcasting
+	DRUID = { 5221, 1082, 6807, 779, 8921, 5176, 5185, 774 },
+	MAGE = { 116, 133, 5143, 1449, 120 },
+	SHAMAN = { 403, 8042, 421, 331 },
+}
+local _, playerClass = UnitClass("player")
+
+local function costOf(name)
+	if not (C_Spell and C_Spell.GetSpellPowerCost) then return nil end
+	local ok, costs = pcall(C_Spell.GetSpellPowerCost, name)
+	if not ok or type(costs) ~= "table" or not costs[1] then return nil end
+	local c = costs[1].cost
+	if c == nil or issecret(c) then return nil end
+	return c
+end
+
+local function hiddenCC()
+	-- direct lookup by spell (works when Clearcasting itself is not hidden)
+	for _, id in ipairs(CC_IDS) do
+		local ok, a = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
+		if ok and a then
+			return { auraInstanceID = -10,
+				expirationTime = not issecret(a.expirationTime) and a.expirationTime or nil,
+				applications = not issecret(a.applications) and a.applications or nil }, "spell id"
+		end
+	end
+	if C_UnitAuras.GetAuraDataBySpellName then
+		local ok, a = pcall(C_UnitAuras.GetAuraDataBySpellName, "player", CC_NAME, "HELPFUL")
+		if ok and a then return { auraInstanceID = -10 }, "spell name" end
+	end
+	if overlayCC then return { auraInstanceID = -10 }, "proc glow" end
+	-- ability costs: an ability that normally costs something is free
+	for _, id in ipairs(PROBES[playerClass] or {}) do
+		local name = spellName(id)
+		if name and (not C_SpellBook or not C_SpellBook.IsSpellKnown or C_SpellBook.IsSpellKnown(id)
+			or (IsPlayerSpell and IsPlayerSpell(id))) then
+			local c = costOf(name)
+			if c then
+				if c > (probeCost[name] or 0) then probeCost[name] = c end
+				if c == 0 and (probeCost[name] or 0) > 0 then return { auraInstanceID = -10 }, "free " .. name end
+			end
+		end
+	end
+	return nil
+end
+
+local lastSource
+local function debugCC(source)
+	if db.debug and source ~= lastSource then
+		print("|cff4fb3ffProcFlare:|r Clearcasting " .. (source and ("on (" .. source .. ")") or "off"))
+	end
+	lastSource = source
+end
+
 local function scan()
 	if not db then return end
 	local now = GetTime()
-	local present, ccAura, isRestricted = {}, nil, false
-	local i = 1
-	while true do
-		local a = C_UnitAuras.GetAuraDataByIndex("player", i, "HELPFUL")
-		if not a then break end
-		if issecret(a.spellId) or issecret(a.auraInstanceID) or issecret(a.duration) then
-			isRestricted = true
-			break
+	local present, ccAura, ccSource, hidden = {}, nil, nil, 0
+	for i = 1, 40 do
+		local a = readAura("player", i, "HELPFUL")
+		if a == nil then break end
+		if a == false then
+			hidden = hidden + 1
+		else
+			present[a.auraInstanceID] = a
+			if CC_SET[a.spellId] or a.name == CC_NAME then ccAura, ccSource = a, "buff" end
 		end
-		present[a.auraInstanceID] = a
-		if CC_SET[a.spellId] or a.name == CC_NAME then ccAura = a end
-		i = i + 1
 	end
-
-	-- Forever hides aura data from addons in restricted content (some boss
-	-- encounters, battlegrounds). Then only Clearcasting is looked up directly.
-	if isRestricted then
-		restricted, baseline = true, true
-		ccAura = nil
-		for _, id in ipairs(CC_IDS) do
-			local ok, a = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
-			if ok and a then
-				ccAura = { auraInstanceID = issecret(a.auraInstanceID) and id or a.auraInstanceID,
-					expirationTime = not issecret(a.expirationTime) and a.expirationTime or nil,
-					applications = not issecret(a.applications) and a.applications or nil }
-				break
-			end
-		end
-		wipe(procs)
-		drawProcs()
-		if db.clearcasting and ccAura then showCC(ccAura, not ccState) elseif not previewUntil then hideCC() end
-		return
+	if not ccAura then
+		-- Look the other ways even when nothing seems hidden: some clients drop
+		-- hidden buffs from the list without saying so.
+		ccAura, ccSource = hiddenCC()
+		if ccAura and ccState and ccState.id ~= -10 then ccAura.auraInstanceID = ccState.id end
 	end
-	restricted = false
+	restricted = hidden > 0
+	debugCC(ccAura and ccSource)
 
-	-- Procs: buffs that are new since the last scan.
+	-- Procs: buffs that are new since the last scan. While buffs are hidden,
+	-- the ones seen before are kept, so they do not count as new afterwards.
 	local changed = false
 	for id, a in pairs(present) do
-		if not known[id] and a ~= ccAura and not baseline and isProc(a, now) then
+		if not known[id] and a ~= ccAura and not baseline and isProc(a, now) and not isOwnSpell(a.spellId) then
 			remember(a.spellId)
 			table.insert(procs, 1, { id = id, spellId = a.spellId, icon = a.icon, expires = a.expirationTime })
 			if procs[MAX_PROCS + 1] then procs[MAX_PROCS + 1] = nil end
@@ -322,10 +391,10 @@ local function scan()
 		if p.preview then
 			if not previewUntil then table.remove(procs, j); changed = true end
 		elseif not p.target then
-			if not present[p.id] then
-				table.remove(procs, j); changed = true
-			else
+			if present[p.id] then
 				p.expires = present[p.id].expirationTime
+			elseif hidden == 0 or (p.expires and p.expires < now) then
+				table.remove(procs, j); changed = true
 			end
 		end
 	end
@@ -341,39 +410,41 @@ local function scan()
 	end
 
 	-- Debuff procs on your target (e.g. Icy Chill, Spell Vulnerability).
-	local tPresent = {}
+	local tPresent, tHidden = {}, false
 	if db.procs and db.targetProcs and UnitExists("target") then
-		local j = 1
-		while true do
-			local a = C_UnitAuras.GetAuraDataByIndex("target", j, "HARMFUL|PLAYER")
-			if not a then break end
-			if issecret(a.spellId) or issecret(a.auraInstanceID) or issecret(a.duration) then tPresent = nil; break end
-			tPresent[a.auraInstanceID] = a
-			j = j + 1
+		for j = 1, 40 do
+			local a = readAura("target", j, "HARMFUL|PLAYER")
+			if a == nil then break end
+			if a == false then tHidden = true else tPresent[a.auraInstanceID] = a end
 		end
 	end
-	if tPresent then
-		for id, a in pairs(tPresent) do
-			if not knownTarget[id] and not targetBaseline and isProc(a, now, true) then
-				remember(a.spellId)
-				table.insert(procs, 1, { id = id, spellId = a.spellId, icon = a.icon, expires = a.expirationTime, target = true })
-				if procs[MAX_PROCS + 1] then procs[MAX_PROCS + 1] = nil end
-				playSound(db.procSound)
-				drawProcs()
-				slots[1].pop:Play()
-			end
+	for id, a in pairs(tPresent) do
+		if not knownTarget[id] and not targetBaseline and isProc(a, now, true) and not isOwnSpell(a.spellId) then
+			remember(a.spellId)
+			table.insert(procs, 1, { id = id, spellId = a.spellId, icon = a.icon, expires = a.expirationTime, target = true })
+			if procs[MAX_PROCS + 1] then procs[MAX_PROCS + 1] = nil end
+			playSound(db.procSound)
+			drawProcs()
+			slots[1].pop:Play()
 		end
-		for j = #procs, 1, -1 do
-			local p = procs[j]
-			if p.target then
-				if not tPresent[p.id] then table.remove(procs, j); drawProcs()
-				else p.expires = tPresent[p.id].expirationTime end
-			end
-		end
-		knownTarget = tPresent
-		targetBaseline = false
 	end
+	for j = #procs, 1, -1 do
+		local p = procs[j]
+		if p.target and not tPresent[p.id] and (not tHidden or (p.expires and p.expires < now)) then
+			table.remove(procs, j); drawProcs()
+		elseif p.target then
+			p.expires = tPresent[p.id].expirationTime
+		end
+	end
+	if tHidden then
+		for id, a in pairs(knownTarget) do if not tPresent[id] then tPresent[id] = a end end
+	end
+	knownTarget = tPresent
+	targetBaseline = false
 
+	if hidden > 0 then
+		for id, a in pairs(known) do if not present[id] then present[id] = a end end
+	end
 	known = present
 	baseline = false
 	if ccState or #procs > 0 then driver:Show() end
@@ -391,10 +462,10 @@ driver:SetScript("OnUpdate", function(self, elapsed)
 	local now = GetTime()
 	if previewUntil and now > previewUntil then
 		previewUntil = nil
-		scan()
+		pcall(scan)
 	elseif recheckSum >= 0.5 and not previewUntil then
 		recheckSum = 0
-		scan()
+		pcall(scan)
 	end
 	-- An expired buff never stays on screen, even if no update arrives.
 	if ccState and ccState.expires and ccState.expires > 0 and ccState.expires < now and not previewUntil then
@@ -532,12 +603,12 @@ local function registerSettings()
 		setting:SetValueChangedCallback(function(_, value) playSound(value) end)
 	end
 
-	checkbox("clearcasting", "Clearcasting alert", "Big pulsing icon while Clearcasting is up.", scan)
+	checkbox("clearcasting", "Clearcasting alert", "Big pulsing icon while Clearcasting is up.", function() pcall(scan) end)
 	soundDropdown("ccSound", "Clearcasting sound", "Sound when Clearcasting procs.")
 	checkbox("flash", "Screen flash", "Short blue flash at the screen edges when Clearcasting procs.")
 	checkbox("procs", "Other procs", "Small icons with countdown for weapon, trinket and talent procs.")
 	soundDropdown("procSound", "Proc sound", "Sound when another proc fires.")
-	checkbox("targetProcs", "Procs on the target", "Debuffs your weapon or talents put on your target, e.g. Icy Chill or Spell Vulnerability.", scan)
+	checkbox("targetProcs", "Procs on the target", "Debuffs your weapon or talents put on your target, e.g. Icy Chill or Spell Vulnerability.", function() pcall(scan) end)
 	checkbox("onlyMine", "Only my own procs", "Ignore short buffs other players put on you.")
 	slider("maxDuration", "Longest proc", 5, 120, 5, "Buffs up to this many seconds count as procs.")
 	slider("scale", "Size", 50, 200, 10, "Size of the icons in percent.", layout)
@@ -575,7 +646,7 @@ local function registerMinimap()
 			tt:AddLine("|cffffffffLeft-click:|r options", 0.8, 0.8, 0.8)
 			tt:AddLine("|cffffffffShift-click:|r move / mute procs", 0.8, 0.8, 0.8)
 			tt:AddLine("|cffffffffRight-click:|r preview", 0.8, 0.8, 0.8)
-			if restricted then tt:AddLine("Buffs are hidden from addons here, only Clearcasting is shown.", 1, 0.5, 0.3, true) end
+			if restricted then tt:AddLine("Buff details are hidden from addons right now, new procs may be missed.", 1, 0.5, 0.3, true) end
 		end,
 	})
 	db.minimap = db.minimap or {}
@@ -593,6 +664,9 @@ SLASH_PROCFLARE2 = "/pfl"
 SlashCmdList.PROCFLARE = function(msg)
 	msg = strtrim(msg or ""):lower()
 	if msg == "test" then preview()
+	elseif msg == "debug" then
+		db.debug = not db.debug
+		print("|cff4fb3ffProcFlare:|r debug " .. (db.debug and "on" or "off"))
 	elseif msg == "move" then setMoving(not moving)
 	else openOptions() end
 end
@@ -602,7 +676,11 @@ local scanQueued = false
 local function queueScan()
 	if scanQueued then return end
 	scanQueued = true
-	C_Timer.After(0, function() scanQueued = false; scan() end)
+	C_Timer.After(0, function()
+		scanQueued = false
+		local ok, err = pcall(scan)
+		if not ok and db and db.debug then print("|cff4fb3ffProcFlare:|r " .. tostring(err)) end
+	end)
 end
 
 local events = CreateFrame("Frame")
@@ -624,10 +702,24 @@ events:SetScript("OnEvent", function(self, event, arg1, _, arg3)
 		self:RegisterUnitEvent("UNIT_AURA", "player", "target")
 		self:RegisterEvent("PLAYER_TARGET_CHANGED")
 		self:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
+		-- The game's own proc glow and ability usability change with Clearcasting.
+		for _, e in ipairs({ "SPELL_ACTIVATION_OVERLAY_SHOW", "SPELL_ACTIVATION_OVERLAY_HIDE",
+			"SPELL_ACTIVATION_OVERLAY_GLOW_SHOW", "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE", "SPELL_UPDATE_USABLE",
+			"PLAYER_REGEN_DISABLED" }) do
+			pcall(self.RegisterEvent, self, e)
+		end
 	elseif event == "PLAYER_ENTERING_WORLD" then
 		baseline = true
-		scan()
-	elseif event == "UNIT_AURA" or event == "PLAYER_REGEN_ENABLED" then
+		queueScan()
+	elseif event == "UNIT_AURA" or event == "PLAYER_REGEN_ENABLED" or event == "PLAYER_REGEN_DISABLED"
+		or event == "SPELL_UPDATE_USABLE" then
+		queueScan()
+	elseif event == "SPELL_ACTIVATION_OVERLAY_SHOW" or event == "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW" then
+		if db.debug then print("|cff4fb3ffProcFlare:|r " .. event .. " " .. tostring(not issecret(arg1) and arg1 or "?")) end
+		if arg1 and not issecret(arg1) and (CC_SET[arg1] or spellName(arg1) == CC_NAME) then overlayCC = true end
+		queueScan()
+	elseif event == "SPELL_ACTIVATION_OVERLAY_HIDE" or event == "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE" then
+		if not arg1 or issecret(arg1) or CC_SET[arg1] or spellName(arg1) == CC_NAME then overlayCC = false end
 		queueScan()
 	elseif event == "PLAYER_TARGET_CHANGED" then
 		targetBaseline = true
