@@ -6,6 +6,7 @@
 ## Version: @project-version@
 ## X-License: All Rights Reserved
 ## X-Curse-Project-ID: 1800929
+## X-Wago-ID: 4N2bLZNL
 ## SavedVariables: ProcFlareDB
 ## IconTexture: Interface\AddOns\ProcFlare\Icons\minimap
 ## AddonCompartmentFunc: ProcFlare_OnCompartmentClick
