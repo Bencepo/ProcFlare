@@ -46,7 +46,6 @@ local MAX_PROCS = 6
 local PREVIEW_PROC = 20007 -- Holy Strength (Crusader enchant)
 
 local db
-local function P(msg) print("|cff4fb3ffProcFlare:|r " .. msg) end
 
 local function spellName(id) return C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(id) end
 local function spellIcon(id) return C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(id) end
@@ -210,7 +209,7 @@ local function remember(spellId)
 		n = n + 1
 		if t < oldestT then oldest, oldestT = id, t end
 	end
-	if n > 12 then db.seen[oldest] = nil end
+	if n > 12 and oldest then db.seen[oldest] = nil end
 end
 
 local function isProc(a, now, onTarget)
@@ -319,14 +318,15 @@ local function scan()
 	end
 	for j = #procs, 1, -1 do
 		local p = procs[j]
-		if p.target then
-			-- handled with the target scan below
-		elseif p.preview then
+		-- procs on the target are handled with the target scan below
+		if p.preview then
 			if not previewUntil then table.remove(procs, j); changed = true end
-		elseif not present[p.id] then
-			table.remove(procs, j); changed = true
-		else
-			p.expires = present[p.id].expirationTime
+		elseif not p.target then
+			if not present[p.id] then
+				table.remove(procs, j); changed = true
+			else
+				p.expires = present[p.id].expirationTime
+			end
 		end
 	end
 	if changed then
