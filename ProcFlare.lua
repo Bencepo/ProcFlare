@@ -287,7 +287,6 @@ end
 
 -- Spells you can cast yourself (e.g. Regrowth) are never procs.
 local function isOwnSpell(id)
-	if IsPlayerSpell and IsPlayerSpell(id) then return true end
 	if C_SpellBook and C_SpellBook.IsSpellKnown and C_SpellBook.IsSpellKnown(id) then return true end
 	return false
 end
@@ -329,8 +328,7 @@ local function hiddenCC()
 	-- ability costs: an ability that normally costs something is free
 	for _, id in ipairs(PROBES[playerClass] or {}) do
 		local name = spellName(id)
-		if name and (not C_SpellBook or not C_SpellBook.IsSpellKnown or C_SpellBook.IsSpellKnown(id)
-			or (IsPlayerSpell and IsPlayerSpell(id))) then
+		if name and isOwnSpell(id) then
 			local c = costOf(name)
 			if c then
 				if c > (probeCost[name] or 0) then probeCost[name] = c end
@@ -358,7 +356,7 @@ local function scan()
 		if a == nil then break end
 		if a == false then
 			hidden = hidden + 1
-		else
+		elseif a then
 			present[a.auraInstanceID] = a
 			if CC_SET[a.spellId] or a.name == CC_NAME then ccAura, ccSource = a, "buff" end
 		end
@@ -415,7 +413,7 @@ local function scan()
 		for j = 1, 40 do
 			local a = readAura("target", j, "HARMFUL|PLAYER")
 			if a == nil then break end
-			if a == false then tHidden = true else tPresent[a.auraInstanceID] = a end
+			if a == false then tHidden = true elseif a then tPresent[a.auraInstanceID] = a end
 		end
 	end
 	for id, a in pairs(tPresent) do
