@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.0
 
 - Clearcasting: big pulsing icon above your character as long as the buff is up, with remaining seconds, a sound and a short blue flash at the screen edges. Also alerts again when a new proc refreshes it.
 - Other procs (weapon enchants such as Crusader, trinkets, talents): small icons with countdown and a softer sound. Found on their own, no list to maintain.
