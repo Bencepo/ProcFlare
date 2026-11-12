@@ -380,15 +380,25 @@ local function scan()
 end
 
 -- Countdowns, ten times a second, and only while something is shown.
-local elapsedSum = 0
+-- Twice a second the buffs are checked again: the game does not always report
+-- a used-up Clearcasting, e.g. when the target dies from the same hit.
+local elapsedSum, recheckSum = 0, 0
 driver:SetScript("OnUpdate", function(self, elapsed)
 	elapsedSum = elapsedSum + elapsed
 	if elapsedSum < 0.1 then return end
+	recheckSum = recheckSum + elapsedSum
 	elapsedSum = 0
 	local now = GetTime()
 	if previewUntil and now > previewUntil then
 		previewUntil = nil
 		scan()
+	elseif recheckSum >= 0.5 and not previewUntil then
+		recheckSum = 0
+		scan()
+	end
+	-- An expired buff never stays on screen, even if no update arrives.
+	if ccState and ccState.expires and ccState.expires > 0 and ccState.expires < now and not previewUntil then
+		hideCC()
 	end
 	if ccState then
 		local e = ccState.expires
@@ -598,6 +608,7 @@ end
 local events = CreateFrame("Frame")
 events:RegisterEvent("ADDON_LOADED")
 events:RegisterEvent("PLAYER_ENTERING_WORLD")
+events:RegisterEvent("PLAYER_REGEN_ENABLED")
 events:SetScript("OnEvent", function(self, event, arg1, _, arg3)
 	if event == "ADDON_LOADED" and arg1 == ADDON then
 		ProcFlareDB = ProcFlareDB or {}
@@ -616,7 +627,7 @@ events:SetScript("OnEvent", function(self, event, arg1, _, arg3)
 	elseif event == "PLAYER_ENTERING_WORLD" then
 		baseline = true
 		scan()
-	elseif event == "UNIT_AURA" then
+	elseif event == "UNIT_AURA" or event == "PLAYER_REGEN_ENABLED" then
 		queueScan()
 	elseif event == "PLAYER_TARGET_CHANGED" then
 		targetBaseline = true

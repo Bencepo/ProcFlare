@@ -5,6 +5,7 @@
 ## Author: Bencepo
 ## Version: @project-version@
 ## X-License: All Rights Reserved
+## X-Curse-Project-ID: 1800929
 ## SavedVariables: ProcFlareDB
 ## IconTexture: Interface\AddOns\ProcFlare\Icons\minimap
 ## AddonCompartmentFunc: ProcFlare_OnCompartmentClick
