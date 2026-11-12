@@ -23,6 +23,10 @@ Procs that only deal damage (Fiery Weapon, Lifestealing) or grant an extra attac
 
 Forever hides buff data from addons in restricted content (some boss encounters, battlegrounds). There ProcFlare still tries to show Clearcasting, other procs are not shown.
 
+## Goes well with SwingCast
+
+[SwingCast](https://www.curseforge.com/wow/addons/swingcast) by the same author: spell icon, cast time, latency zone and a swing timer on the standard cast bar, tinted while Maul, Heroic Strike or Cleave is queued.
+
 ## AI disclosure
 
 The code was written with the help of an AI assistant (Claude). Bencepo designed the features, tests everything in game and maintains the addon.
