@@ -1,0 +1,16 @@
+## Interface: 16001
+## Title: ProcFlare
+## Notes: Lightweight proc alerts: big pulsing Clearcasting icon with sound and screen flash, small icons with countdown for weapon, trinket and talent procs.
+## Notes-deDE: Schlanke Proc-Hinweise: großes pulsierendes Freizaubern-Symbol mit Ton und Bildschirmblitz, kleine Symbole mit Countdown für Waffen-, Schmuck- und Talent-Procs.
+## Author: Bencepo
+## Version: @project-version@
+## X-License: All Rights Reserved
+## SavedVariables: ProcFlareDB
+## IconTexture: Interface\AddOns\ProcFlare\Icons\minimap
+## AddonCompartmentFunc: ProcFlare_OnCompartmentClick
+
+Libs\LibStub\LibStub.lua
+Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
+Libs\LibDataBroker-1.1\LibDataBroker-1.1.lua
+Libs\LibDBIcon-1.0\LibDBIcon-1.0.lua
+ProcFlare.lua
