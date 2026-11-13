@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.3
+
+- New icon: a die mid-roll with a glowing face, for the minimap button and the addon list.
+
 ## 0.1.2
 
 - Fixed: while your target's debuffs were hidden (in combat), a proc on the target could stop the scan halfway, so procs on you were announced again and again.
