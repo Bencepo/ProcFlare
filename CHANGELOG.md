@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.5
+
+- Brighter icon that stays readable on the round minimap button.
+
 ## 0.1.4
 
 - Icon reworked: bigger die with clear pips and less glare, easy to read even at minimap size.
