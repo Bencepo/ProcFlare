@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.4
+
+- Icon reworked: bigger die with clear pips and less glare, easy to read even at minimap size.
+
 ## 0.1.3
 
 - New icon: a die mid-roll with a glowing face, for the minimap button and the addon list.
