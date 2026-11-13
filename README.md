@@ -30,6 +30,8 @@ Forever hides buff data from addons in restricted content (some boss encounters,
 
 All addons, live demos and the web pages: **https://bencepo.github.io**
 
+Like the addons? Support them on Ko-fi: **https://ko-fi.com/bencepo**
+
 - [LevelTrail](https://bencepo.github.io/leveltrail/): records your leveling run; the page shows splits, XP sources, deaths, records and a share image.
 - [VendorFloor](https://bencepo.github.io/vendorfloor/): auction house sniper for finds below vendor price, below disenchant value and profitable crafts.
 - [SwingCast](https://bencepo.github.io/swingcast/): spell icon, cast time, latency zone and a swing timer on the standard cast bar.
