@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2
+
+- Fixed: while your target's debuffs were hidden (in combat), a proc on the target could stop the scan halfway, so procs on you were announced again and again.
+- Classes without Clearcasting no longer rescan their buffs on every change of mana, rage or energy; with Clearcasting at most five times a second.
+
 ## 0.1.1
 
 - Clearcasting is now also found in combat, where Forever hides buff details from addons: by spell, by the game's own proc glow, or by your abilities becoming free.

@@ -430,7 +430,7 @@ local function scan()
 		local p = procs[j]
 		if p.target and not tPresent[p.id] and (not tHidden or (p.expires and p.expires < now)) then
 			table.remove(procs, j); drawProcs()
-		elseif p.target then
+		elseif p.target and tPresent[p.id] then
 			p.expires = tPresent[p.id].expirationTime
 		end
 	end
@@ -671,6 +671,7 @@ end
 
 ---------------------------------------------------------------- events
 local scanQueued = false
+local usablePending = false
 local function queueScan()
 	if scanQueued then return end
 	scanQueued = true
@@ -709,9 +710,18 @@ events:SetScript("OnEvent", function(self, event, arg1, _, arg3)
 	elseif event == "PLAYER_ENTERING_WORLD" then
 		baseline = true
 		queueScan()
-	elseif event == "UNIT_AURA" or event == "PLAYER_REGEN_ENABLED" or event == "PLAYER_REGEN_DISABLED"
-		or event == "SPELL_UPDATE_USABLE" then
+	elseif event == "UNIT_AURA" or event == "PLAYER_REGEN_ENABLED" or event == "PLAYER_REGEN_DISABLED" then
 		queueScan()
+	elseif event == "SPELL_UPDATE_USABLE" then
+		-- Fires on every resource change. Only needed to see Clearcasting through free spell
+		-- costs (classes with Clearcasting): one scan 0.2 s after the first of a burst.
+		if PROBES[playerClass] and not usablePending then
+			usablePending = true
+			C_Timer.After(0.2, function()
+				usablePending = false
+				queueScan()
+			end)
+		end
 	elseif event == "SPELL_ACTIVATION_OVERLAY_SHOW" or event == "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW" then
 		if db.debug then print("|cff4fb3ffProcFlare:|r " .. event .. " " .. tostring(not issecret(arg1) and arg1 or "?")) end
 		if arg1 and not issecret(arg1) and (CC_SET[arg1] or spellName(arg1) == CC_NAME) then overlayCC = true end
