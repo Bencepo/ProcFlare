@@ -15,7 +15,7 @@ Everything is set with buttons, no commands needed:
 - **Minimap button:** left-click options, shift-click move mode, right-click preview
 - **Addon menu** next to the minimap
 
-What you can change: Clearcasting alert, its sound (ProcFlare's own chime or a game sound) and the screen flash; other procs and their sound; only your own procs; the longest buff that still counts as a proc (30 s by default); size; position.
+What you can change: sound pack (Melee or Caster, picked from your class), Clearcasting alert, its sound and the screen flash; volume and the game's sound channel it plays on; other procs and their sound; only your own procs; the longest buff that still counts as a proc (30 s by default); size; position.
 
 ## Limits
 

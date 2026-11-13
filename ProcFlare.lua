@@ -23,6 +23,8 @@ local DEFAULTS = {
 	maxDuration = 30,    -- longest buff that still counts as a proc, in seconds
 	ccSound = -1,        -- sound for Clearcasting (0 = none, below 0 = ProcFlare's own sound file)
 	procSound = -2,      -- sound for other procs
+	volume = 100,        -- volume of ProcFlare's own sounds in percent (25, 50, 75, 100)
+	channel = "SFX",     -- sound channel: WoW's volume slider for it applies too
 	flash = true,        -- screen-edge flash on Clearcasting
 	scale = 100,         -- size in percent
 	showMinimap = true,  -- minimap button
@@ -33,22 +35,42 @@ local CC_IDS = { 16870, 12536, 16246 }
 local CC_SET = {}
 for _, id in ipairs(CC_IDS) do CC_SET[id] = true end
 
--- ProcFlare's own sounds (the same tones as on bencepo.github.io/procflare).
+-- ProcFlare's own sounds, in four volume steps each (Sounds/<name>_<volume>.ogg).
 local SOUND_FILES = {
-	[-1] = "Interface\\AddOns\\ProcFlare\\Sounds\\clearcasting.ogg",
-	[-2] = "Interface\\AddOns\\ProcFlare\\Sounds\\proc.ogg",
+	[-1] = "chime", [-2] = "ping",
+	[-11] = "war_drums", [-12] = "war_horn", [-13] = "axe_clash", [-14] = "beast_roar", [-15] = "rage_spike", [-16] = "thud",
+	[-21] = "arcane_surge", [-22] = "mana_burst", [-23] = "frost_shatter", [-24] = "fire_burst", [-25] = "power_chord", [-26] = "spark",
 }
 
 local SOUNDS = {
 	{ 0, "None" },
+	{ -11, "Melee: War drums" },
+	{ -12, "Melee: War horn" },
+	{ -13, "Melee: Axe clash" },
+	{ -14, "Melee: Beast roar" },
+	{ -15, "Melee: Rage spike" },
+	{ -16, "Melee: Thud" },
+	{ -21, "Caster: Arcane surge" },
+	{ -22, "Caster: Mana burst" },
+	{ -23, "Caster: Frost shatter" },
+	{ -24, "Caster: Fire burst" },
+	{ -25, "Caster: Power chord" },
+	{ -26, "Caster: Spark" },
 	{ -1, "ProcFlare chime" },
 	{ -2, "ProcFlare ping" },
-	{ 8959, "Raid warning" },
-	{ 8960, "Ready check" },
-	{ 12889, "Alarm clock" },
-	{ 3175, "Map ping" },
-	{ 18019, "Toast" },
+	{ 8959, "Game: Raid warning" },
+	{ 8960, "Game: Ready check" },
+	{ 12889, "Game: Alarm clock" },
+	{ 3175, "Game: Map ping" },
+	{ 18019, "Game: Toast" },
 }
+
+-- Sound packs: Clearcasting sound and proc sound.
+local PACKS = {
+	[1] = { name = "Melee", cc = -11, proc = -13 },
+	[2] = { name = "Caster", cc = -21, proc = -26 },
+}
+local CHANNELS = { { "Master", "Master" }, { "SFX", "Sound effects" }, { "Ambience", "Ambience" }, { "Dialog", "Dialog" } }
 
 local MAX_PROCS = 6
 local PREVIEW_PROC = 20007 -- Holy Strength (Crusader enchant)
@@ -59,7 +81,33 @@ local function spellName(id) return C_Spell and C_Spell.GetSpellName and C_Spell
 local function spellIcon(id) return C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(id) end
 local function playSound(id)
 	if not id or id == 0 then return end
-	if SOUND_FILES[id] then PlaySoundFile(SOUND_FILES[id], "Master") elseif id > 0 then PlaySound(id, "Master") end
+	local channel = (db and db.channel) or "SFX"
+	if SOUND_FILES[id] then
+		local v = (db and tonumber(db.volume)) or 100
+		v = math.max(25, math.min(100, math.floor((v + 12) / 25) * 25))
+		PlaySoundFile("Interface\\AddOns\\ProcFlare\\Sounds\\" .. SOUND_FILES[id] .. "_" .. v .. ".ogg", channel)
+	elseif id > 0 then
+		PlaySound(id, channel)
+	end
+end
+
+-- Melee or caster, from class and, for hybrids, the talent tree with the most points.
+local MELEE_CLASS = { WARRIOR = true, ROGUE = true, HUNTER = true, PALADIN = true, DEATHKNIGHT = true }
+local MELEE_TREE = { DRUID = 2, SHAMAN = 2 } -- Feral Combat, Enhancement
+local function guessPack()
+	local _, class = UnitClass("player")
+	if MELEE_CLASS[class] then return 1 end
+	local tree = MELEE_TREE[class]
+	if tree and GetTalentTabInfo then
+		local best, bestPoints = nil, 0
+		for i = 1, 3 do
+			local r = { pcall(GetTalentTabInfo, i) }
+			local points = r[1] and ((type(r[4]) == "number" and r[4]) or (type(r[6]) == "number" and r[6])) or 0
+			if not issecret(points) and points > bestPoints then best, bestPoints = i, points end
+		end
+		if best == tree then return 1 end
+	end
+	return 2
 end
 
 local CC_NAME = spellName(16870) or "Clearcasting"
@@ -599,24 +647,45 @@ local function registerSettings()
 		Settings.CreateSlider(category, setting, opts, tooltip)
 		if onChange then setting:SetValueChangedCallback(onChange) end
 	end
-	local function soundDropdown(key, label, tooltip)
-		local dropdown = Settings.CreateDropdown or Settings.CreateDropDown
+	local dropdown = Settings.CreateDropdown or Settings.CreateDropDown
+	local soundSettings, quiet = {}, false
+	local function list(key, label, varType, default, items, tooltip, onChange)
 		if not (dropdown and Settings.CreateControlTextContainer) then return end
-		local setting = Settings.RegisterAddOnSetting(category, "PROCFLARE_" .. key:upper(), key, db,
-			Settings.VarType.Number, label, DEFAULTS[key])
+		local setting = Settings.RegisterAddOnSetting(category, "PROCFLARE_" .. key:upper(), key, db, varType, label, default)
 		dropdown(category, setting, function()
 			local c = Settings.CreateControlTextContainer()
-			for _, s in ipairs(SOUNDS) do c:Add(s[1], s[2]) end
+			for _, it in ipairs(items) do c:Add(it[1], it[2]) end
 			return c:GetData()
 		end, tooltip)
-		setting:SetValueChangedCallback(function(_, value) playSound(value) end)
+		if onChange then setting:SetValueChangedCallback(onChange) end
+		return setting
 	end
+	local function soundDropdown(key, label, tooltip)
+		soundSettings[key] = list(key, label, Settings.VarType.Number, DEFAULTS[key], SOUNDS, tooltip,
+			function(_, value) if not quiet then playSound(value) end end)
+	end
+	local packItems = {}
+	for i, p in ipairs(PACKS) do packItems[#packItems + 1] = { i, p.name } end
+	list("pack", "Sound pack", Settings.VarType.Number, 1, packItems,
+		"Melee: drums, horns and steel. Caster: arcane, frost and fire. Sets both sounds below; each can still be changed.",
+		function(_, value)
+			local p = PACKS[value]; if not p then return end
+			quiet = true
+			if soundSettings.ccSound then soundSettings.ccSound:SetValue(p.cc) else db.ccSound = p.cc end
+			if soundSettings.procSound then soundSettings.procSound:SetValue(p.proc) else db.procSound = p.proc end
+			quiet = false
+			playSound(p.cc)
+		end)
 
 	checkbox("clearcasting", "Clearcasting alert", "Big pulsing icon while Clearcasting is up.", function() pcall(scan) end)
 	soundDropdown("ccSound", "Clearcasting sound", "Sound when Clearcasting procs.")
 	checkbox("flash", "Screen flash", "Short blue flash at the screen edges when Clearcasting procs.")
 	checkbox("procs", "Other procs", "Small icons with countdown for weapon, trinket and talent procs.")
 	soundDropdown("procSound", "Proc sound", "Sound when another proc fires.")
+	slider("volume", "Volume", 25, 100, 25, "Volume of ProcFlare's own sounds in percent. The game's volume slider for the sound channel applies on top.",
+		function() playSound(db.ccSound) end)
+	list("channel", "Sound channel", Settings.VarType.String, DEFAULTS.channel, CHANNELS,
+		"Which of the game's volume sliders (System > Audio) controls ProcFlare's sounds.", function() playSound(db.ccSound) end)
 	checkbox("targetProcs", "Procs on the target", "Debuffs your weapon or talents put on your target, e.g. Icy Chill or Spell Vulnerability.", function() pcall(scan) end)
 	checkbox("onlyMine", "Only my own procs", "Ignore short buffs other players put on you.")
 	slider("maxDuration", "Longest proc", 5, 120, 5, "Buffs up to this many seconds count as procs.")
@@ -727,6 +796,17 @@ events:SetScript("OnEvent", function(self, event, arg1, _, arg3)
 	elseif event == "PLAYER_ENTERING_WORLD" then
 		baseline = true
 		queueScan()
+		-- 0.2.0: pick the sound pack once from class and talents, unless sounds were picked by hand.
+		if not db.packPicked then
+			C_Timer.After(3, function()
+				if db.packPicked then return end
+				db.packPicked = true
+				db.pack = guessPack()
+				local untouched = { [8959] = true, [3175] = true, [-1] = true, [-2] = true }
+				if untouched[db.ccSound] then db.ccSound = PACKS[db.pack].cc end
+				if untouched[db.procSound] then db.procSound = PACKS[db.pack].proc end
+			end)
+		end
 	elseif event == "UNIT_AURA" or event == "PLAYER_REGEN_ENABLED" or event == "PLAYER_REGEN_DISABLED" then
 		queueScan()
 	elseif event == "SPELL_UPDATE_USABLE" then
