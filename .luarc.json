@@ -11,6 +11,7 @@
   "diagnostics.globals": [
     "ColorPickerFrame",
     "CreateSettingsButtonInitializer",
+    "GetTalentTabInfo",
     "MinimalSliderWithSteppersMixin",
     "Settings",
     "SlashCmdList",
