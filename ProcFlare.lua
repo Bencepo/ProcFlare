@@ -21,8 +21,8 @@ local DEFAULTS = {
 	onlyMine = true,     -- only buffs that come from you (weapon, trinket, talent)
 	targetProcs = true,  -- debuff procs from you on your target (Icy Chill, Spell Vulnerability)
 	maxDuration = 30,    -- longest buff that still counts as a proc, in seconds
-	ccSound = 8959,      -- sound for Clearcasting (0 = none)
-	procSound = 3175,    -- sound for other procs (0 = none)
+	ccSound = -1,        -- sound for Clearcasting (0 = none, below 0 = ProcFlare's own sound file)
+	procSound = -2,      -- sound for other procs
 	flash = true,        -- screen-edge flash on Clearcasting
 	scale = 100,         -- size in percent
 	showMinimap = true,  -- minimap button
@@ -33,8 +33,16 @@ local CC_IDS = { 16870, 12536, 16246 }
 local CC_SET = {}
 for _, id in ipairs(CC_IDS) do CC_SET[id] = true end
 
+-- ProcFlare's own sounds (the same tones as on bencepo.github.io/procflare).
+local SOUND_FILES = {
+	[-1] = "Interface\\AddOns\\ProcFlare\\Sounds\\clearcasting.ogg",
+	[-2] = "Interface\\AddOns\\ProcFlare\\Sounds\\proc.ogg",
+}
+
 local SOUNDS = {
 	{ 0, "None" },
+	{ -1, "ProcFlare chime" },
+	{ -2, "ProcFlare ping" },
 	{ 8959, "Raid warning" },
 	{ 8960, "Ready check" },
 	{ 12889, "Alarm clock" },
@@ -49,7 +57,10 @@ local db
 
 local function spellName(id) return C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(id) end
 local function spellIcon(id) return C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(id) end
-local function playSound(id) if id and id > 0 then PlaySound(id, "Master") end end
+local function playSound(id)
+	if not id or id == 0 then return end
+	if SOUND_FILES[id] then PlaySoundFile(SOUND_FILES[id], "Master") elseif id > 0 then PlaySound(id, "Master") end
+end
 
 local CC_NAME = spellName(16870) or "Clearcasting"
 
@@ -692,6 +703,12 @@ events:SetScript("OnEvent", function(self, event, arg1, _, arg3)
 		db = ProcFlareDB
 		for k, v in pairs(DEFAULTS) do
 			if db[k] == nil then db[k] = v end
+		end
+		-- 0.1.6: the old default game sounds move to ProcFlare's own sounds once.
+		if not db.ownSounds then
+			if db.ccSound == 8959 then db.ccSound = -1 end
+			if db.procSound == 3175 then db.procSound = -2 end
+			db.ownSounds = true
 		end
 		db.muted = db.muted or {}
 		db.seen = db.seen or {}
