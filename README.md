@@ -29,6 +29,10 @@ Procs that only deal damage (Fiery Weapon, Lifestealing) or grant an extra attac
 Forever hides buff data from addons in restricted content (some boss encounters, battlegrounds). There ProcFlare still tries to show Clearcasting, other procs are not shown.
 
 
+## Feedback and bug reports
+
+Found a bug or have an idea? [Open an issue](https://github.com/Bencepo/ProcFlare/issues/new/choose), it takes a minute. For bugs the Lua error text (from BugSack, or `/console scriptErrors 1`) and your ProcFlare version help the most. No GitHub account? Comment on [CurseForge](https://www.curseforge.com/wow/addons/procflare#comments). Every report gets read.
+
 ## More addons by Bencepo
 
 All addons, live demos and the web pages: **https://bencepo.github.io**
