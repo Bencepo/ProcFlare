@@ -28,12 +28,51 @@ local DEFAULTS = {
 	flash = true,        -- screen-edge flash on Clearcasting
 	scale = 100,         -- size in percent
 	showMinimap = true,  -- minimap button
+	reactive = true,     -- abilities that open up after a dodge, parry or block (Overpower, Riposte ...)
 }
 
--- Clearcasting: Omen of Clarity (druid), Arcane Concentration (mage), Elemental Focus (shaman).
-local CC_IDS = { 16870, 12536, 16246 }
+local _, CLASS = UnitClass("player")
+
+-- The big alert: Clearcasting and its kin, procs that make the next spell free or instant.
+-- Omen of Clarity (druid), Arcane Concentration (mage), Elemental Focus (shaman) and
+-- Shadow Trance from Nightfall (warlock: the next Shadow Bolt is instant).
+local BIG = {
+	DRUID = { id = 16870, label = "Clearcasting" },
+	MAGE = { id = 12536, label = "Clearcasting" },
+	SHAMAN = { id = 16246, label = "Clearcasting" },
+	WARLOCK = { id = 17941, label = "Shadow Trance", color = { 0.75, 0.4, 1 } },
+}
+local BIG_PROC = BIG[CLASS] or BIG.DRUID
+local BIG_COLOR = BIG_PROC.color or { 0.45, 0.75, 1 }
+local CC_IDS = { 16870, 12536, 16246, 17941 }
 local CC_SET = {}
 for _, id in ipairs(CC_IDS) do CC_SET[id] = true end
+
+-- Abilities that only open up for a few seconds after a dodge, parry or block. The
+-- first id names the spell; any rank known counts. Only the player's class is used.
+local REACTIVE = {
+	WARRIOR = { { 7384, 7887, 11584, 11585 }, { 6572, 6574, 7379, 11600, 11601, 25288 } }, -- Overpower, Revenge
+	ROGUE = { { 14251 } }, -- Riposte
+	HUNTER = { { 1495, 14269, 14270, 14271 }, { 19306, 20909, 20910 } }, -- Mongoose Bite, Counterattack
+}
+local REACTIVE_WINDOW = 5 -- seconds the game keeps them open
+
+-- Known proc buffs of each class. Short buffs are found on their own, but Forever hides
+-- buff details in combat; these are then asked for by spell id, so they still show.
+local WATCH = {
+	ALL = { 20007 }, -- Holy Strength (Crusader enchant)
+	WARRIOR = { 12966, 12967, 12968, 12969, 12970, 12880, 14201, 14202, 14203, 14204 }, -- Flurry, Enrage
+	SHAMAN = { 16257, 16277, 16278, 16279, 16280 }, -- Flurry
+	PALADIN = { 20050, 20052, 20053, 20054, 20055, 20128, 20131, 20132, 20133, 20134 }, -- Vengeance, Redoubt
+	ROGUE = { 14143, 14149 }, -- Remorseless Attacks
+	HUNTER = { 6150 }, -- Quick Shots
+	PRIEST = { 15271, 27828 }, -- Spirit Tap, Focused Casting (Martyrdom)
+	DRUID = { 16886 }, -- Nature's Grace
+}
+local watchList = {}
+for _, key in ipairs({ "ALL", CLASS }) do
+	for _, id in ipairs(WATCH[key] or {}) do watchList[#watchList + 1] = id end
+end
 
 -- ProcFlare's own sounds, in four volume steps each (Sounds/<name>_<volume>.ogg).
 local SOUND_FILES = {
@@ -110,7 +149,7 @@ local function guessPack()
 	return 2
 end
 
-local CC_NAME = spellName(16870) or "Clearcasting"
+local CC_NAME = spellName(BIG_PROC.id) or BIG_PROC.label
 
 ---------------------------------------------------------------- frames
 local anchor = CreateFrame("Frame", "ProcFlareAnchor", UIParent)
@@ -142,16 +181,16 @@ cc:Hide()
 cc.icon = cc:CreateTexture(nil, "ARTWORK")
 cc.icon:SetAllPoints()
 cc.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
-cc.icon:SetTexture(spellIcon(16870))
+cc.icon:SetTexture(spellIcon(BIG_PROC.id))
 cc.glow = cc:CreateTexture(nil, "OVERLAY")
 cc.glow:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
 cc.glow:SetBlendMode("ADD")
-cc.glow:SetVertexColor(0.45, 0.75, 1)
+cc.glow:SetVertexColor(BIG_COLOR[1], BIG_COLOR[2], BIG_COLOR[3])
 cc.glow:SetPoint("CENTER")
 cc.glow:SetSize(124, 124)
 cc.label = cc:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 cc.label:SetPoint("TOP", cc, "BOTTOM", 0, -4)
-cc.label:SetTextColor(0.55, 0.8, 1)
+cc.label:SetTextColor(math.min(BIG_COLOR[1] + 0.1, 1), math.min(BIG_COLOR[2] + 0.05, 1), 1)
 cc.label:SetText(CC_NAME)
 cc.time = cc:CreateFontString(nil, "OVERLAY", "NumberFontNormalLarge")
 cc.time:SetPoint("BOTTOMRIGHT", -2, 2)
@@ -182,7 +221,7 @@ local flash = UIParent:CreateTexture(nil, "BACKGROUND")
 flash:SetAllPoints(UIParent)
 flash:SetTexture("Interface\\FullScreenTextures\\LowHealth")
 flash:SetBlendMode("ADD")
-flash:SetVertexColor(0.3, 0.6, 1)
+flash:SetVertexColor(BIG_COLOR[1] * 0.7, BIG_COLOR[2] * 0.8, 1)
 flash:SetAlpha(0)
 local flashAnim = flash:CreateAnimationGroup()
 local fIn = flashAnim:CreateAnimation("Alpha")
@@ -273,6 +312,7 @@ end
 
 local function isProc(a, now, onTarget)
 	if not db.procs or db.muted[a.spellId] then return false end
+	if a.watched then return true end
 	local d = a.duration
 	if not d or d <= 0 or d > db.maxDuration then return false end
 	if db.onlyMine and not onTarget and not a.isFromPlayerOrPlayerPet then return false end
@@ -325,6 +365,7 @@ end
 
 local driver = CreateFrame("Frame")
 driver:Hide()
+local scanReactive -- defined with the reactive abilities
 
 -- Reads one aura without ever touching hidden data: Forever hides most buff
 -- details from addons in combat, and reading them raises an error.
@@ -358,7 +399,20 @@ local PROBES = {        -- spells whose cost drops to 0 with Clearcasting
 	MAGE = { 116, 133, 5143, 1449, 120 },
 	SHAMAN = { 403, 8042, 421, 331 },
 }
+local CAST_PROBES = {   -- spells whose cast time drops to 0 with the big proc
+	WARLOCK = { 686 }, -- Shadow Bolt (Shadow Trance)
+}
+local probeCast = {}
 local _, playerClass = UnitClass("player")
+
+local function castTimeOf(name)
+	if not (C_Spell and C_Spell.GetSpellInfo) then return nil end
+	local ok, info = pcall(C_Spell.GetSpellInfo, name)
+	if not ok or type(info) ~= "table" then return nil end
+	local t = info.castTime
+	if t == nil or issecret(t) then return nil end
+	return t
+end
 
 local function costOf(name)
 	if not (C_Spell and C_Spell.GetSpellPowerCost) then return nil end
@@ -395,6 +449,17 @@ local function hiddenCC()
 			end
 		end
 	end
+	-- cast time: a spell that normally has one is instant
+	for _, id in ipairs(CAST_PROBES[playerClass] or {}) do
+		local name = spellName(id)
+		if name and isOwnSpell(id) then
+			local t = castTimeOf(name)
+			if t then
+				if t > (probeCast[name] or 0) then probeCast[name] = t end
+				if t == 0 and (probeCast[name] or 0) > 0 then return { auraInstanceID = -10 }, "instant " .. name end
+			end
+		end
+	end
 	return nil
 end
 
@@ -404,6 +469,58 @@ local function debugCC(source)
 		print("|cff4fb3ffProcFlare:|r Clearcasting " .. (source and ("on (" .. source .. ")") or "off"))
 	end
 	lastSource = source
+end
+
+-- Reactive abilities (Overpower, Revenge, Riposte, Mongoose Bite, Counterattack).
+local reactives = {}      -- the class's abilities that are known: { id, name, icon, ids }
+local reactiveById = {}   -- any rank id -> entry
+local function buildReactives()
+	reactives, reactiveById = {}, {}
+	for _, ids in ipairs(REACTIVE[playerClass] or {}) do
+		local isKnown = false
+		for _, id in ipairs(ids) do if isOwnSpell(id) then isKnown = true end end
+		local name = spellName(ids[1])
+		if isKnown and name then
+			local r = { id = ids[1], name = name, icon = spellIcon(ids[1]) }
+			reactives[#reactives + 1] = r
+			for _, id in ipairs(ids) do reactiveById[id] = r end
+		end
+	end
+end
+
+local isUsable = C_Spell and C_Spell.IsSpellUsable
+local function reactiveOpen(r)
+	if r.glow then return true end
+	if not isUsable then return false end
+	local ok, usable, noMana = pcall(isUsable, r.name)
+	if not ok or issecret(usable) or issecret(noMana) then return false end
+	-- noMana: the window is open, only rage or energy is missing
+	return (usable or noMana) and true or false
+end
+
+scanReactive = function(now)
+	for _, r in ipairs(reactives) do
+		local open = db.procs and db.reactive and reactiveOpen(r)
+		-- only a change counts: a client that always reports "usable" never alerts
+		if not open then r.closedSeen = true end
+		local idx
+		for j, p in ipairs(procs) do
+			if p.reactive and p.spellId == r.id then idx = j end
+		end
+		if open and r.closedSeen and not r.fired and not idx and not db.muted[r.id] then
+			r.fired = true
+			remember(r.id)
+			table.insert(procs, 1, { id = "r" .. r.id, spellId = r.id, icon = r.icon, expires = now + REACTIVE_WINDOW, reactive = true })
+			if procs[MAX_PROCS + 1] then procs[MAX_PROCS + 1] = nil end
+			playSound(db.procSound)
+			drawProcs()
+			slots[1].pop:Play()
+		elseif idx and (not open or procs[idx].expires < now) then
+			table.remove(procs, idx)
+			drawProcs()
+		end
+		if not open then r.fired = false end
+	end
 end
 
 local function scan()
@@ -420,6 +537,25 @@ local function scan()
 			if CC_SET[a.spellId] or a.name == CC_NAME then ccAura, ccSource = a, "buff" end
 		end
 	end
+	-- Known proc buffs of the class, asked for by spell id while details are hidden.
+	if hidden > 0 and db.procs then
+		-- skip what is already seen: in the list now, or before and not run out yet
+		local bySpell = {}
+		for _, a in pairs(present) do bySpell[a.spellId] = true end
+		for _, a in pairs(known) do
+			if not a.watched and a.expirationTime and a.expirationTime > now then bySpell[a.spellId] = true end
+		end
+		for _, id in ipairs(watchList) do
+			if not bySpell[id] then
+				local ok, a = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
+				if ok and a then
+					local key = "w" .. id
+					present[key] = { auraInstanceID = key, spellId = id, icon = spellIcon(id), name = spellName(id), watched = true,
+						expirationTime = (not issecret(a.expirationTime)) and a.expirationTime or nil }
+				end
+			end
+		end
+	end
 	if not ccAura then
 		-- Look the other ways even when nothing seems hidden: some clients drop
 		-- hidden buffs from the list without saying so.
@@ -433,7 +569,15 @@ local function scan()
 	-- the ones seen before are kept, so they do not count as new afterwards.
 	local changed = false
 	for id, a in pairs(present) do
-		if not known[id] and a ~= ccAura and not baseline and isProc(a, now) and not isOwnSpell(a.spellId) then
+		local same
+		for _, p in ipairs(procs) do
+			if p.spellId == a.spellId and not p.target and not p.reactive then same = p end
+		end
+		if same then
+			-- the same buff, seen once by spell id and once in the list: keep one icon
+			same.id = id
+			if a.expirationTime then same.expires = a.expirationTime end
+		elseif not known[id] and a ~= ccAura and not baseline and isProc(a, now) and not isOwnSpell(a.spellId) then
 			remember(a.spellId)
 			table.insert(procs, 1, { id = id, spellId = a.spellId, icon = a.icon, expires = a.expirationTime })
 			if procs[MAX_PROCS + 1] then procs[MAX_PROCS + 1] = nil end
@@ -447,10 +591,11 @@ local function scan()
 		-- procs on the target are handled with the target scan below
 		if p.preview then
 			if not previewUntil then table.remove(procs, j); changed = true end
-		elseif not p.target then
+		elseif not p.target and not p.reactive then
 			if present[p.id] then
 				p.expires = present[p.id].expirationTime
-			elseif hidden == 0 or (p.expires and p.expires < now) then
+			-- a buff asked for by spell id is gone for sure once the game no longer has it
+			elseif hidden == 0 or type(p.id) == "string" or (p.expires and p.expires < now) then
 				table.remove(procs, j); changed = true
 			end
 		end
@@ -499,6 +644,8 @@ local function scan()
 	knownTarget = tPresent
 	targetBaseline = false
 
+	scanReactive(now)
+
 	if hidden > 0 then
 		for id, a in pairs(known) do if not present[id] then present[id] = a end end
 	end
@@ -543,7 +690,7 @@ end)
 ---------------------------------------------------------------- preview, move mode
 local function preview()
 	previewUntil = GetTime() + 6
-	showCC({ auraInstanceID = -1, expirationTime = GetTime() + 15, applications = 1, icon = spellIcon(16870) }, true)
+	showCC({ auraInstanceID = -1, expirationTime = GetTime() + 15, applications = 1, icon = spellIcon(BIG_PROC.id) }, true)
 	table.insert(procs, 1, { id = -2, spellId = PREVIEW_PROC, icon = spellIcon(PREVIEW_PROC), expires = GetTime() + 15, preview = true })
 	if procs[MAX_PROCS + 1] then procs[MAX_PROCS + 1] = nil end
 	drawProcs()
@@ -627,7 +774,7 @@ local function buildWindow()
 	local UI = _G.LibStub("BencepoUI-1.0")
 	local version = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version")
 	win = UI:CreateWindow({
-		name = "ProcFlareOptionsFrame", title = ADDON, width = 520, height = 400,
+		name = "ProcFlareOptionsFrame", title = ADDON, width = 520, height = 430,
 		subtitle = (version and not version:find("@")) and version or nil,
 		accent = { 0.31, 0.70, 1, 1 }, db = db, posKey = "optPos",
 	})
@@ -641,17 +788,21 @@ local function buildWindow()
 	-- left: what is shown
 	local L = 16
 	win:Header(L, -48, "Alerts")
-	win:Check(L, -72, "Clearcasting alert", "Big pulsing icon while Clearcasting is up.", opt("clearcasting", function() pcall(scan) end))
+	win:Check(L, -72, BIG_PROC.label .. " alert", "Big pulsing icon while " .. BIG_PROC.label
+		.. " is up (Clearcasting for druids, mages and shamans, Shadow Trance from Nightfall for warlocks).",
+		opt("clearcasting", function() pcall(scan) end))
 	win:Check(L, -96, "Screen flash", "Short blue flash at the screen edges when Clearcasting procs.", opt("flash"))
 	win:Check(L, -120, "Other procs", "Small icons with countdown for weapon, trinket and talent procs.", opt("procs"))
 	win:Check(L, -144, "Procs on the target", "Debuffs your weapon or talents put on your target, e.g. Icy Chill or Spell Vulnerability.",
 		opt("targetProcs", function() pcall(scan) end))
 	win:Check(L, -168, "Only my own procs", "Ignore short buffs other players put on you.", opt("onlyMine"))
-	win:Check(L, -192, "Minimap button", "Show the ProcFlare button at the minimap.", opt("showMinimap", applyMinimap))
-	win:Slider(L, -224, "Longest proc", 5, 120, 5, function() return db.maxDuration end,
+	win:Check(L, -192, "Reactive abilities", "Overpower and Revenge (warrior), Riposte (rogue), Mongoose Bite and Counterattack (hunter): "
+		.. "shown for the few seconds after a dodge, parry or block opens them. Only your class's ones.", opt("reactive", function() pcall(scan) end))
+	win:Check(L, -216, "Minimap button", "Show the ProcFlare button at the minimap.", opt("showMinimap", applyMinimap))
+	win:Slider(L, -248, "Longest proc", 5, 120, 5, function() return db.maxDuration end,
 		function(v) db.maxDuration = v end, "Buffs up to this many seconds count as procs.", 170,
 		function(v) return v .. " s" end)
-	win:Slider(L, -264, "Size", 50, 200, 10, function() return db.scale end,
+	win:Slider(L, -288, "Size", 50, 200, 10, function() return db.scale end,
 		function(v) db.scale = v; layout() end, "Size of the icons in percent.", 170,
 		function(v) return v .. " %" end)
 
@@ -680,7 +831,7 @@ local function buildWindow()
 
 	-- bottom: preview and position
 	local prev = win:Button("Preview", 110, preview, "Shows Clearcasting and a weapon proc for 6 seconds, with sounds.")
-	prev:SetPoint("TOPLEFT", L, -312)
+	prev:SetPoint("TOPLEFT", L, -340)
 	local move = win:Button("Move icons", 130, function() setMoving(not moving) end,
 		"Drag the icons where you want them. Your recent procs are shown: right-click one to mute or unmute it.")
 	move:SetPoint("LEFT", prev, "RIGHT", 8, 0)
@@ -688,7 +839,7 @@ local function buildWindow()
 	doneButton:HookScript("OnClick", function() win:Refresh() end)
 	local unmute = win:Button("Unmute all", 110, function() wipe(db.muted); refreshMoveMode() end, "Alerts for every proc again.")
 	unmute:SetPoint("LEFT", move, "RIGHT", 8, 0)
-	win:Text(L, -350, "Muting: click \"Move icons\", then right-click a proc. Changes apply at once; the window stays open while you play.", 488)
+	win:Text(L, -378, "Muting: click \"Move icons\", then right-click a proc. Changes apply at once; the window stays open while you play.", 488)
 end
 
 local function openOptions()
@@ -795,10 +946,14 @@ events:SetScript("OnEvent", function(self, event, arg1, _, arg3)
 		-- The game's own proc glow and ability usability change with Clearcasting.
 		for _, e in ipairs({ "SPELL_ACTIVATION_OVERLAY_SHOW", "SPELL_ACTIVATION_OVERLAY_HIDE",
 			"SPELL_ACTIVATION_OVERLAY_GLOW_SHOW", "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE", "SPELL_UPDATE_USABLE",
+			"ACTIONBAR_UPDATE_USABLE", "SPELLS_CHANGED",
 			"PLAYER_REGEN_DISABLED" }) do
 			pcall(self.RegisterEvent, self, e)
 		end
+	elseif event == "SPELLS_CHANGED" then
+		buildReactives()
 	elseif event == "PLAYER_ENTERING_WORLD" then
+		buildReactives()
 		baseline = true
 		queueScan()
 		-- 0.2.0: pick the sound pack once from class and talents, unless sounds were picked by hand.
@@ -814,12 +969,12 @@ events:SetScript("OnEvent", function(self, event, arg1, _, arg3)
 		end
 	elseif event == "UNIT_AURA" or event == "PLAYER_REGEN_ENABLED" or event == "PLAYER_REGEN_DISABLED" then
 		queueScan()
-	elseif event == "SPELL_UPDATE_USABLE" then
-		-- Fires on every resource change. Only needed to see Clearcasting through free spell
-		-- costs (classes with Clearcasting): one scan 0.2 s after the first of a burst.
-		if PROBES[playerClass] and not usablePending then
+	elseif event == "SPELL_UPDATE_USABLE" or event == "ACTIONBAR_UPDATE_USABLE" then
+		-- Fires on every resource change. Only needed to see the big proc through free or
+		-- instant spells and the reactive abilities: one scan 0.1 s after the first of a burst.
+		if (PROBES[playerClass] or CAST_PROBES[playerClass] or #reactives > 0) and not usablePending then
 			usablePending = true
-			C_Timer.After(0.2, function()
+			C_Timer.After(0.1, function()
 				usablePending = false
 				queueScan()
 			end)
@@ -827,9 +982,12 @@ events:SetScript("OnEvent", function(self, event, arg1, _, arg3)
 	elseif event == "SPELL_ACTIVATION_OVERLAY_SHOW" or event == "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW" then
 		if db.debug then print("|cff4fb3ffProcFlare:|r " .. event .. " " .. tostring(not issecret(arg1) and arg1 or "?")) end
 		if arg1 and not issecret(arg1) and (CC_SET[arg1] or spellName(arg1) == CC_NAME) then overlayCC = true end
+		if arg1 and not issecret(arg1) and reactiveById[arg1] then reactiveById[arg1].glow = true end
 		queueScan()
 	elseif event == "SPELL_ACTIVATION_OVERLAY_HIDE" or event == "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE" then
 		if not arg1 or issecret(arg1) or CC_SET[arg1] or spellName(arg1) == CC_NAME then overlayCC = false end
+		if arg1 and not issecret(arg1) and reactiveById[arg1] then reactiveById[arg1].glow = nil
+		elseif not arg1 or issecret(arg1) then for _, r in ipairs(reactives) do r.glow = nil end end
 		queueScan()
 	elseif event == "PLAYER_TARGET_CHANGED" then
 		targetBaseline = true

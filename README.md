@@ -4,8 +4,10 @@ Lightweight proc alerts for WoW Forever.
 
 **Website and live demo:** https://bencepo.github.io/procflare/
 
-- **Clearcasting:** big pulsing icon above your character as long as the buff is up, with the seconds left, a sound and a short blue flash at the screen edges. Works for Omen of Clarity (druid), Arcane Concentration (mage) and Elemental Focus (shaman).
+- **Clearcasting:** big pulsing icon above your character as long as the buff is up, with the seconds left, a sound and a short blue flash at the screen edges. Works for Omen of Clarity (druid), Arcane Concentration (mage) and Elemental Focus (shaman), and for Shadow Trance from Nightfall (warlock, in purple).
 - **Other procs:** weapon enchants such as Crusader, trinkets and talent procs show as small icons with a countdown and a softer sound. Nothing to set up: any new short buff that comes from you and that you did not cast yourself counts as a proc, so new weapons and trinkets are picked up on their own.
+- **Reactive abilities:** Overpower and Revenge (warrior), Riposte (rogue), Mongoose Bite and Counterattack (hunter) show for the few seconds after a dodge, parry or block opens them.
+- **Also in combat:** the known procs of your class (Flurry, Enrage, Vengeance, Redoubt, Remorseless Attacks, Quick Shots, Spirit Tap, Focused Casting, Nature's Grace) and Crusader are still found while the game hides buff details.
 - **Procs on your target:** debuffs your weapon or talents put on your target, such as Icy Chill or Spell Vulnerability.
 - **Mute what you do not need:** in move mode your recent procs are shown, right-click one to mute or unmute it.
 
