@@ -14,7 +14,9 @@
     "GetTalentTabInfo",
     "MinimalSliderWithSteppersMixin",
     "Settings",
+    "SettingsPanel",
     "SlashCmdList",
+    "UISpecialFrames",
     "issecretvalue"
   ]
 }

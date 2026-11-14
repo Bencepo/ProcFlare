@@ -611,14 +611,7 @@ doneButton:SetScript("OnClick", function() setMoving(false) end)
 doneButton:Hide()
 
 ---------------------------------------------------------------- options window, minimap button
-local category
 local LDBIcon
-
-local function openOptions()
-	if category and Settings and Settings.OpenToCategory then
-		Settings.OpenToCategory(category:GetID())
-	end
-end
 
 local function applyMinimap()
 	if not LDBIcon then return end
@@ -627,81 +620,93 @@ local function applyMinimap()
 	if db.showMinimap then LDBIcon:Show(ADDON) else LDBIcon:Hide(ADDON) end
 end
 
-local function registerSettings()
-	if not (Settings and Settings.RegisterVerticalLayoutCategory and Settings.RegisterAddOnSetting) then return end
-	local layoutCat
-	category, layoutCat = Settings.RegisterVerticalLayoutCategory(ADDON)
-	local function checkbox(key, label, tooltip, onChange)
-		local setting = Settings.RegisterAddOnSetting(category, "PROCFLARE_" .. key:upper(), key, db,
-			Settings.VarType.Boolean, label, DEFAULTS[key])
-		Settings.CreateCheckbox(category, setting, tooltip)
-		if onChange then setting:SetValueChangedCallback(onChange) end
-	end
-	local function slider(key, label, min, max, step, tooltip, onChange)
-		local setting = Settings.RegisterAddOnSetting(category, "PROCFLARE_" .. key:upper(), key, db,
-			Settings.VarType.Number, label, DEFAULTS[key])
-		local opts = Settings.CreateSliderOptions(min, max, step)
-		if MinimalSliderWithSteppersMixin and opts.SetLabelFormatter then
-			opts:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right)
+-- Own window instead of a page in the game's options: drag it anywhere, it stays open
+-- while you play, and every change shows at once.
+local win
+local function buildWindow()
+	local UI = _G.LibStub("BencepoUI-1.0")
+	local version = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version")
+	win = UI:CreateWindow({
+		name = "ProcFlareOptionsFrame", title = ADDON, width = 520, height = 400,
+		subtitle = (version and not version:find("@")) and version or nil,
+		accent = { 0.31, 0.70, 1, 1 }, db = db, posKey = "optPos",
+	})
+	local function opt(key, onChange)
+		return function() return db[key] end, function(v)
+			db[key] = v
+			if onChange then onChange(v) end
 		end
-		Settings.CreateSlider(category, setting, opts, tooltip)
-		if onChange then setting:SetValueChangedCallback(onChange) end
 	end
-	local dropdown = Settings.CreateDropdown or Settings.CreateDropDown
-	local soundSettings, quiet = {}, false
-	local function list(key, label, varType, default, items, tooltip, onChange)
-		if not (dropdown and Settings.CreateControlTextContainer) then return end
-		local setting = Settings.RegisterAddOnSetting(category, "PROCFLARE_" .. key:upper(), key, db, varType, label, default)
-		dropdown(category, setting, function()
-			local c = Settings.CreateControlTextContainer()
-			for _, it in ipairs(items) do c:Add(it[1], it[2]) end
-			return c:GetData()
-		end, tooltip)
-		if onChange then setting:SetValueChangedCallback(onChange) end
-		return setting
-	end
-	local function soundDropdown(key, label, tooltip)
-		soundSettings[key] = list(key, label, Settings.VarType.Number, DEFAULTS[key], SOUNDS, tooltip,
-			function(_, value) if not quiet then playSound(value) end end)
-	end
+
+	-- left: what is shown
+	local L = 16
+	win:Header(L, -48, "Alerts")
+	win:Check(L, -72, "Clearcasting alert", "Big pulsing icon while Clearcasting is up.", opt("clearcasting", function() pcall(scan) end))
+	win:Check(L, -96, "Screen flash", "Short blue flash at the screen edges when Clearcasting procs.", opt("flash"))
+	win:Check(L, -120, "Other procs", "Small icons with countdown for weapon, trinket and talent procs.", opt("procs"))
+	win:Check(L, -144, "Procs on the target", "Debuffs your weapon or talents put on your target, e.g. Icy Chill or Spell Vulnerability.",
+		opt("targetProcs", function() pcall(scan) end))
+	win:Check(L, -168, "Only my own procs", "Ignore short buffs other players put on you.", opt("onlyMine"))
+	win:Check(L, -192, "Minimap button", "Show the ProcFlare button at the minimap.", opt("showMinimap", applyMinimap))
+	win:Slider(L, -224, "Longest proc", 5, 120, 5, function() return db.maxDuration end,
+		function(v) db.maxDuration = v end, "Buffs up to this many seconds count as procs.", 170,
+		function(v) return v .. " s" end)
+	win:Slider(L, -264, "Size", 50, 200, 10, function() return db.scale end,
+		function(v) db.scale = v; layout() end, "Size of the icons in percent.", 170,
+		function(v) return v .. " %" end)
+
+	-- right: sounds
+	local R = 270
 	local packItems = {}
 	for i, p in ipairs(PACKS) do packItems[#packItems + 1] = { i, p.name } end
-	list("pack", "Sound pack", Settings.VarType.Number, 1, packItems,
-		"Melee: drums, horns and steel. Caster: arcane, frost and fire. Sets both sounds below; each can still be changed.",
-		function(_, value)
-			local p = PACKS[value]; if not p then return end
-			quiet = true
-			if soundSettings.ccSound then soundSettings.ccSound:SetValue(p.cc) else db.ccSound = p.cc end
-			if soundSettings.procSound then soundSettings.procSound:SetValue(p.proc) else db.procSound = p.proc end
-			quiet = false
-			playSound(p.cc)
-		end)
+	win:Header(R, -48, "Sound")
+	win:Dropdown(R, -70, "Sound pack", 220, packItems, function() return db.pack or 1 end, function(v)
+		local p = PACKS[v]
+		if not p then return end
+		db.pack, db.ccSound, db.procSound = v, p.cc, p.proc
+		playSound(p.cc)
+	end, "Melee: drums, horns and steel. Caster: arcane, frost and fire. Sets both sounds below; each can still be changed.")
+	win:Dropdown(R, -116, "Clearcasting sound", 220, SOUNDS, function() return db.ccSound end,
+		function(v) db.ccSound = v; playSound(v) end, "Sound when Clearcasting procs.")
+	win:Dropdown(R, -162, "Proc sound", 220, SOUNDS, function() return db.procSound end,
+		function(v) db.procSound = v; playSound(v) end, "Sound when another proc fires.")
+	win:Slider(R, -210, "Volume", 25, 100, 25, function() return db.volume end,
+		function(v) db.volume = v; playSound(db.ccSound) end,
+		"Volume of ProcFlare's own sounds. The game's volume slider for the sound channel applies on top.", 170,
+		function(v) return v .. " %" end)
+	win:Dropdown(R, -250, "Sound channel", 220, CHANNELS, function() return db.channel end,
+		function(v) db.channel = v; playSound(db.ccSound) end,
+		"Which of the game's volume sliders (System > Audio) controls ProcFlare's sounds.")
 
-	checkbox("clearcasting", "Clearcasting alert", "Big pulsing icon while Clearcasting is up.", function() pcall(scan) end)
-	soundDropdown("ccSound", "Clearcasting sound", "Sound when Clearcasting procs.")
-	checkbox("flash", "Screen flash", "Short blue flash at the screen edges when Clearcasting procs.")
-	checkbox("procs", "Other procs", "Small icons with countdown for weapon, trinket and talent procs.")
-	soundDropdown("procSound", "Proc sound", "Sound when another proc fires.")
-	slider("volume", "Volume", 25, 100, 25, "Volume of ProcFlare's own sounds in percent. The game's volume slider for the sound channel applies on top.",
-		function() playSound(db.ccSound) end)
-	list("channel", "Sound channel", Settings.VarType.String, DEFAULTS.channel, CHANNELS,
-		"Which of the game's volume sliders (System > Audio) controls ProcFlare's sounds.", function() playSound(db.ccSound) end)
-	checkbox("targetProcs", "Procs on the target", "Debuffs your weapon or talents put on your target, e.g. Icy Chill or Spell Vulnerability.", function() pcall(scan) end)
-	checkbox("onlyMine", "Only my own procs", "Ignore short buffs other players put on you.")
-	slider("maxDuration", "Longest proc", 5, 120, 5, "Buffs up to this many seconds count as procs.")
-	slider("scale", "Size", 50, 200, 10, "Size of the icons in percent.", layout)
-	checkbox("showMinimap", "Minimap button", "Show the ProcFlare button at the minimap.", applyMinimap)
+	-- bottom: preview and position
+	local prev = win:Button("Preview", 110, preview, "Shows Clearcasting and a weapon proc for 6 seconds, with sounds.")
+	prev:SetPoint("TOPLEFT", L, -312)
+	local move = win:Button("Move icons", 130, function() setMoving(not moving) end,
+		"Drag the icons where you want them. Your recent procs are shown: right-click one to mute or unmute it.")
+	move:SetPoint("LEFT", prev, "RIGHT", 8, 0)
+	win:OnRefresh(function() move:SetText(moving and "Done moving" or "Move icons") end)
+	doneButton:HookScript("OnClick", function() win:Refresh() end)
+	local unmute = win:Button("Unmute all", 110, function() wipe(db.muted); refreshMoveMode() end, "Alerts for every proc again.")
+	unmute:SetPoint("LEFT", move, "RIGHT", 8, 0)
+	win:Text(L, -350, "Muting: click \"Move icons\", then right-click a proc. Changes apply at once; the window stays open while you play.", 488)
+end
 
+local function openOptions()
+	if not win then buildWindow() end
+	win:Toggle()
+end
+
+-- The game's options only point to the window, so ProcFlare is still found there.
+local function registerSettings()
+	if not (Settings and Settings.RegisterVerticalLayoutCategory and Settings.RegisterAddOnCategory) then return end
+	local category, layoutCat = Settings.RegisterVerticalLayoutCategory(ADDON)
 	if layoutCat and CreateSettingsButtonInitializer then
-		layoutCat:AddInitializer(CreateSettingsButtonInitializer("Preview", "Show", preview,
-			"Shows Clearcasting and a weapon proc for 6 seconds, with sounds.", true))
-		layoutCat:AddInitializer(CreateSettingsButtonInitializer("Position and muted procs", "Move",
-			function() setMoving(true) end,
-			"Drag the icons where you want them. Your recent procs are shown: right-click one to mute or unmute it.", true))
-		layoutCat:AddInitializer(CreateSettingsButtonInitializer("Muted procs", "Unmute all",
-			function() wipe(db.muted); refreshMoveMode() end, "Alerts for every proc again.", true))
+		layoutCat:AddInitializer(CreateSettingsButtonInitializer("ProcFlare has its own window", "Open", function()
+			if SettingsPanel and SettingsPanel:IsShown() then HideUIPanel(SettingsPanel) end
+			if not win then buildWindow() end
+			win:Show()
+		end, "Opens the ProcFlare window. It can be dragged anywhere and stays open while you play.", true))
 	end
-
 	Settings.RegisterAddOnCategory(category)
 end
 

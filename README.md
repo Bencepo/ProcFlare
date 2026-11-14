@@ -11,11 +11,12 @@ Lightweight proc alerts for WoW Forever.
 
 ## Settings
 
-Everything is set with buttons, no commands needed:
+Everything is set in ProcFlare's own window, no commands needed. Drag it anywhere: it stays open while you play, so every change shows at once.
 
-- **Options > AddOns > ProcFlare**
-- **Minimap button:** left-click options, shift-click move mode, right-click preview
+- **`/pfl`**
+- **Minimap button:** left-click the window, shift-click move mode, right-click preview
 - **Addon menu** next to the minimap
+- **Options > AddOns > ProcFlare** points to the window
 
 What you can change: sound pack (Melee or Caster, picked from your class), Clearcasting alert, its sound and the screen flash; volume and the game's sound channel it plays on; other procs and their sound; only your own procs; the longest buff that still counts as a proc (30 s by default); size; position.
 
