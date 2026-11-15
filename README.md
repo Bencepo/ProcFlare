@@ -15,7 +15,7 @@ Lightweight proc alerts for WoW Forever.
 
 Everything is set in ProcFlare's own window, no commands needed. Drag it anywhere: it stays open while you play, so every change shows at once.
 
-- **`/pfl`**
+- **`/pfl`** (or `/procflare`): opens the window. `/pfl test` preview, `/pfl move` move mode, `/pfl debug` debug output on or off
 - **Minimap button:** left-click the window, shift-click move mode, right-click preview
 - **Addon menu** next to the minimap
 - **Options > AddOns > ProcFlare** points to the window

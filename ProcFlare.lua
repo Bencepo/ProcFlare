@@ -134,9 +134,8 @@ end
 local MELEE_CLASS = { WARRIOR = true, ROGUE = true, HUNTER = true, PALADIN = true, DEATHKNIGHT = true }
 local MELEE_TREE = { DRUID = 2, SHAMAN = 2 } -- Feral Combat, Enhancement
 local function guessPack()
-	local _, class = UnitClass("player")
-	if MELEE_CLASS[class] then return 1 end
-	local tree = MELEE_TREE[class]
+	if MELEE_CLASS[CLASS] then return 1 end
+	local tree = MELEE_TREE[CLASS]
 	if tree and GetTalentTabInfo then
 		local best, bestPoints = nil, 0
 		for i = 1, 3 do
@@ -403,7 +402,7 @@ local CAST_PROBES = {   -- spells whose cast time drops to 0 with the big proc
 	WARLOCK = { 686 }, -- Shadow Bolt (Shadow Trance)
 }
 local probeCast = {}
-local _, playerClass = UnitClass("player")
+local playerClass = CLASS
 
 local function castTimeOf(name)
 	if not (C_Spell and C_Spell.GetSpellInfo) then return nil end
@@ -680,9 +679,12 @@ driver:SetScript("OnUpdate", function(self, elapsed)
 		cc.time:SetText(e and e > now and string.format("%.0f", e - now) or "")
 		cc.count:SetText(ccState.count and ccState.count > 1 and ccState.count or "")
 	end
-	for i, p in ipairs(procs) do
-		local e = p.expires
-		slots[i].time:SetText(e and e > now and string.format("%.1f", e - now) or "")
+	-- move mode owns the slots
+	if not moving then
+		for i, p in ipairs(procs) do
+			local e = p.expires
+			slots[i].time:SetText(e and e > now and string.format("%.1f", e - now) or "")
+		end
 	end
 	if not ccState and #procs == 0 and not previewUntil then self:Hide() end
 end)
@@ -694,7 +696,7 @@ local function preview()
 	table.insert(procs, 1, { id = -2, spellId = PREVIEW_PROC, icon = spellIcon(PREVIEW_PROC), expires = GetTime() + 15, preview = true })
 	if procs[MAX_PROCS + 1] then procs[MAX_PROCS + 1] = nil end
 	drawProcs()
-	slots[1].pop:Play()
+	if not moving then slots[1].pop:Play() end
 	C_Timer.After(0.6, function() playSound(db.procSound) end)
 	driver:Show()
 end
@@ -777,6 +779,7 @@ local function buildWindow()
 		name = "ProcFlareOptionsFrame", title = ADDON, width = 520, height = 430,
 		subtitle = (version and not version:find("@")) and version or nil,
 		accent = { 0.31, 0.70, 1, 1 }, db = db, posKey = "optPos",
+		bugUrl = "https://github.com/Bencepo/ProcFlare/issues/new/choose",
 	})
 	local function opt(key, onChange)
 		return function() return db[key] end, function(v)
