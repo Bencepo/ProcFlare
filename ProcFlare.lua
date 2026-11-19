@@ -7,6 +7,7 @@
 --   * other procs (weapon enchants such as Crusader, trinkets, talents): a small
 --     icon with countdown under it, and a softer sound
 --   * debuff procs from you on your target (Icy Chill, Spell Vulnerability)
+--   * optional proc counter: each proc in this fight and the last fight
 -- A "proc" is any new buff on you that lasts a short time (30 s by default),
 -- comes from you and was not cast by you just before. No list to maintain:
 -- new weapons and trinkets are picked up on their own.
@@ -29,6 +30,8 @@ local DEFAULTS = {
 	scale = 100,         -- size in percent
 	showMinimap = true,  -- minimap button
 	reactive = true,     -- abilities that open up after a dodge, parry or block (Overpower, Riposte ...)
+	counter = false,     -- proc counter window: this fight and the last fight
+	counterReset = true, -- the counter starts over when a fight starts
 }
 
 local _, CLASS = UnitClass("player")
@@ -287,6 +290,134 @@ local function layout()
 	if p then anchor:SetPoint(p[1], UIParent, p[2] or p[1], p[3], p[4]) else anchor:SetPoint("CENTER", 0, 160) end
 end
 
+---------------------------------------------------------------- proc counter
+-- How often each proc fired in this fight and in the last one. A fight starts
+-- when you enter combat (if "reset when a fight starts" is on) or on a manual reset.
+local fight, lastFight = {}, {} -- spellId -> count
+local counterFrame
+local drawCounter
+local COUNTER_ROWS = 10
+
+local function countProc(spellId)
+	if not spellId then return end
+	fight[spellId] = (fight[spellId] or 0) + 1
+	drawCounter()
+end
+
+local function newFight()
+	lastFight, fight = fight, {}
+	drawCounter()
+end
+
+local function buildCounter()
+	local f = CreateFrame("Frame", "ProcFlareCounter", UIParent, "BackdropTemplate")
+	f:SetSize(200, 40)
+	f:SetMovable(true)
+	f:EnableMouse(true)
+	f:SetClampedToScreen(true)
+	f:RegisterForDrag("LeftButton")
+	f:SetScript("OnDragStart", f.StartMoving)
+	f:SetScript("OnDragStop", function(self)
+		self:StopMovingOrSizing()
+		local point, _, rel, x, y = self:GetPoint()
+		db.counterPos = { point, rel, x, y }
+	end)
+	if f.SetBackdrop then
+		f:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
+		f:SetBackdropColor(0, 0, 0, 0.6)
+		f:SetBackdropBorderColor(0.31, 0.70, 1, 0.6)
+	end
+	local p = db.counterPos
+	if p then f:SetPoint(p[1], UIParent, p[2] or p[1], p[3], p[4]) else f:SetPoint("RIGHT", UIParent, "RIGHT", -260, 0) end
+	f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	f.title:SetPoint("TOPLEFT", 6, -5)
+	f.title:SetText("Procs")
+	f.headLast = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	f.headLast:SetPoint("TOPRIGHT", -6, -5)
+	f.headLast:SetWidth(34)
+	f.headLast:SetJustifyH("RIGHT")
+	f.headLast:SetText("Last")
+	f.headCur = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	f.headCur:SetPoint("RIGHT", f.headLast, "LEFT", -4, 0)
+	f.headCur:SetWidth(34)
+	f.headCur:SetJustifyH("RIGHT")
+	f.headCur:SetText("Fight")
+	f.empty = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	f.empty:SetPoint("TOPLEFT", 6, -22)
+	f.empty:SetText("No procs yet")
+	f.rows = {}
+	for i = 1, COUNTER_ROWS do
+		local r = CreateFrame("Frame", nil, f)
+		r:SetSize(188, 16)
+		r:SetPoint("TOPLEFT", 6, -20 - (i - 1) * 17)
+		r.icon = r:CreateTexture(nil, "ARTWORK")
+		r.icon:SetSize(14, 14)
+		r.icon:SetPoint("LEFT")
+		r.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+		r.last = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		r.last:SetPoint("RIGHT")
+		r.last:SetWidth(34)
+		r.last:SetJustifyH("RIGHT")
+		r.last:SetTextColor(0.6, 0.6, 0.6)
+		r.cur = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		r.cur:SetPoint("RIGHT", r.last, "LEFT", -4, 0)
+		r.cur:SetWidth(34)
+		r.cur:SetJustifyH("RIGHT")
+		r.name = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		r.name:SetPoint("LEFT", r.icon, "RIGHT", 4, 0)
+		r.name:SetPoint("RIGHT", r.cur, "LEFT", -4, 0)
+		r.name:SetJustifyH("LEFT")
+		r.name:SetWordWrap(false)
+		f.rows[i] = r
+	end
+	f:SetScript("OnMouseUp", function(_, button)
+		if button == "RightButton" then newFight() end
+	end)
+	f:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		GameTooltip:AddLine("ProcFlare proc counter")
+		GameTooltip:AddLine("Procs in this fight and in the last fight.", 0.8, 0.8, 0.8, true)
+		GameTooltip:AddLine("Drag: move. Right-click: start a new count.", 0.8, 0.8, 0.8, true)
+		GameTooltip:Show()
+	end)
+	f:SetScript("OnLeave", function() GameTooltip:Hide() end)
+	counterFrame = f
+end
+
+drawCounter = function()
+	if not db then return end
+	if not db.counter then
+		if counterFrame then counterFrame:Hide() end
+		return
+	end
+	if not counterFrame then buildCounter() end
+	local ids, list = {}, {}
+	for id in pairs(fight) do ids[id] = true end
+	for id in pairs(lastFight) do ids[id] = true end
+	for id in pairs(ids) do list[#list + 1] = { id = id, cur = fight[id] or 0, last = lastFight[id] or 0 } end
+	table.sort(list, function(a, b)
+		if a.cur ~= b.cur then return a.cur > b.cur end
+		if a.last ~= b.last then return a.last > b.last end
+		return a.id < b.id
+	end)
+	local n = math.min(#list, COUNTER_ROWS)
+	for i = 1, COUNTER_ROWS do
+		local r, e = counterFrame.rows[i], list[i]
+		if e and i <= n then
+			r.icon:SetTexture(spellIcon(e.id))
+			r.name:SetText(spellName(e.id) or e.id)
+			r.cur:SetText(e.cur)
+			r.last:SetText(e.last)
+			r:Show()
+		else
+			r:Hide()
+		end
+	end
+	counterFrame.empty:SetShown(n == 0)
+	counterFrame:SetHeight(26 + math.max(n, 1) * 17)
+	counterFrame:Show()
+end
+
 ---------------------------------------------------------------- state
 local known = {}       -- auraInstanceID -> true, buffs seen in the last scan
 local procs = {}       -- shown procs: { id, spellId, icon, expires }
@@ -299,6 +430,7 @@ local targetBaseline = true
 local previewUntil
 
 local function remember(spellId)
+	countProc(spellId)
 	db.seen[spellId] = time()
 	-- keep the 12 newest
 	local n, oldest, oldestT = 0, nil, math.huge
@@ -330,6 +462,7 @@ local function showCC(a, alert)
 	cc:Show()
 	if not pulse:IsPlaying() then pulse:Play() end
 	if alert and (new or refreshed) then
+		if a.auraInstanceID ~= -1 then countProc(BIG_PROC.id) end -- -1: preview
 		cc.pop:Play()
 		playSound(db.ccSound)
 		if db.flash then flashAnim:Stop(); flashAnim:Play() end
@@ -574,6 +707,10 @@ local function scan()
 		end
 		if same then
 			-- the same buff, seen once by spell id and once in the list: keep one icon
+			-- a new proc while the buff is still up only renews it: count it all the same
+			if not same.preview and a.expirationTime and same.expires and a.expirationTime > same.expires + 0.5 then
+				countProc(a.spellId)
+			end
 			same.id = id
 			if a.expirationTime then same.expires = a.expirationTime end
 		elseif not known[id] and a ~= ccAura and not baseline and isProc(a, now) and not isOwnSpell(a.spellId) then
@@ -776,7 +913,7 @@ local function buildWindow()
 	local UI = _G.LibStub("BencepoUI-1.0")
 	local version = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version")
 	win = UI:CreateWindow({
-		name = "ProcFlareOptionsFrame", title = ADDON, width = 520, height = 430,
+		name = "ProcFlareOptionsFrame", title = ADDON, width = 520, height = 510,
 		subtitle = (version and not version:find("@")) and version or nil,
 		accent = { 0.31, 0.70, 1, 1 }, db = db, posKey = "optPos",
 		bugUrl = "https://github.com/Bencepo/ProcFlare/issues/new/choose",
@@ -843,6 +980,15 @@ local function buildWindow()
 	local unmute = win:Button("Unmute all", 110, function() wipe(db.muted); refreshMoveMode() end, "Alerts for every proc again.")
 	unmute:SetPoint("LEFT", move, "RIGHT", 8, 0)
 	win:Text(L, -378, "Muting: click \"Move icons\", then right-click a proc. Changes apply at once; the window stays open while you play.", 488)
+
+	-- proc counter
+	win:Header(L, -414, "Proc counter")
+	win:Check(L, -438, "Show proc counter", "Small window that counts each proc in this fight and in the last fight. Drag it to move it.",
+		opt("counter", function() drawCounter() end))
+	win:Check(R, -438, "Reset when a fight starts", "Entering combat starts a new count; the old one becomes \"Last\". "
+		.. "Off: the count runs on until you reset it.", opt("counterReset"))
+	local reset = win:Button("Reset counter", 130, newFight, "Starts a new count; the current one becomes \"Last\". Also: right-click the counter.")
+	reset:SetPoint("TOPLEFT", L, -476)
 end
 
 local function openOptions()
@@ -905,6 +1051,9 @@ SlashCmdList.PROCFLARE = function(msg)
 		db.debug = not db.debug
 		print("|cff4fb3ffProcFlare:|r debug " .. (db.debug and "on" or "off"))
 	elseif msg == "move" then setMoving(not moving)
+	elseif msg == "reset" then newFight()
+	elseif msg == "counter" then db.counter = not db.counter; drawCounter(); if win then win:Refresh() end
+
 	else openOptions() end
 end
 
@@ -941,6 +1090,7 @@ events:SetScript("OnEvent", function(self, event, arg1, _, arg3)
 		db.muted = db.muted or {}
 		db.seen = db.seen or {}
 		layout()
+		drawCounter()
 		registerSettings()
 		registerMinimap()
 		self:RegisterUnitEvent("UNIT_AURA", "player", "target")
@@ -971,6 +1121,7 @@ events:SetScript("OnEvent", function(self, event, arg1, _, arg3)
 			end)
 		end
 	elseif event == "UNIT_AURA" or event == "PLAYER_REGEN_ENABLED" or event == "PLAYER_REGEN_DISABLED" then
+		if event == "PLAYER_REGEN_DISABLED" and db.counterReset then newFight() end
 		queueScan()
 	elseif event == "SPELL_UPDATE_USABLE" or event == "ACTIONBAR_UPDATE_USABLE" then
 		-- Fires on every resource change. Only needed to see the big proc through free or

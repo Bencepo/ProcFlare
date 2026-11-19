@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.0
+
+- **Proc counter:** small window that counts each proc in this fight and in the last fight, with its icon. Turn it on under "Proc counter" in the window. A new count starts when you enter combat ("Reset when a fight starts", on by default) or by hand: "Reset counter", right-click the counter or `/pfl reset`. Drag it anywhere.
+- A proc that fires again while its buff is still up (Crusader, Flurry) counts again.
+
 ## 0.3.1
 
 - "Report a bug" button at the bottom of the window: shows the link to the bug reports, ready to copy with Ctrl+C.

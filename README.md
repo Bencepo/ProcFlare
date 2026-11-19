@@ -9,18 +9,19 @@ Lightweight proc alerts for WoW Forever.
 - **Reactive abilities:** Overpower and Revenge (warrior), Riposte (rogue), Mongoose Bite and Counterattack (hunter) show for the few seconds after a dodge, parry or block opens them.
 - **Also in combat:** the known procs of your class (Flurry, Enrage, Vengeance, Redoubt, Remorseless Attacks, Quick Shots, Spirit Tap, Focused Casting, Nature's Grace) and Crusader are still found while the game hides buff details.
 - **Procs on your target:** debuffs your weapon or talents put on your target, such as Icy Chill or Spell Vulnerability.
+- **Proc counter (optional):** how often each proc fired in this fight and in the last fight. Starts over when you enter combat, or by hand.
 - **Mute what you do not need:** in move mode your recent procs are shown, right-click one to mute or unmute it.
 
 ## Settings
 
 Everything is set in ProcFlare's own window, no commands needed. Drag it anywhere: it stays open while you play, so every change shows at once.
 
-- **`/pfl`** (or `/procflare`): opens the window. `/pfl test` preview, `/pfl move` move mode, `/pfl debug` debug output on or off
+- **`/pfl`** (or `/procflare`): opens the window. `/pfl test` preview, `/pfl move` move mode, `/pfl reset` new proc count, `/pfl counter` counter on or off, `/pfl debug` debug output on or off
 - **Minimap button:** left-click the window, shift-click move mode, right-click preview
 - **Addon menu** next to the minimap
 - **Options > AddOns > ProcFlare** points to the window
 
-What you can change: sound pack (Melee or Caster, picked from your class), Clearcasting alert, its sound and the screen flash; volume and the game's sound channel it plays on; other procs and their sound; only your own procs; the longest buff that still counts as a proc (30 s by default); size; position.
+What you can change: sound pack (Melee or Caster, picked from your class), Clearcasting alert, its sound and the screen flash; volume and the game's sound channel it plays on; other procs and their sound; only your own procs; the longest buff that still counts as a proc (30 s by default); size; position; proc counter and when it starts over.
 
 ## Limits
 
