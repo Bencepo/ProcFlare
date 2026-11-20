@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0
+
+- New icon in the addon list and on the minimap button, part of the new Bencepo logo family.
+- ProcFlare is now 1.0: stable after the 0.x releases, nothing else changes.
+- The package no longer contains a leftover backup file of the code.
+
 ## 0.4.0
 
 - **Proc counter:** small window that counts each proc in this fight and in the last fight, with its icon. Turn it on under "Proc counter" in the window. A new count starts when you enter combat ("Reset when a fight starts", on by default) or by hand: "Reset counter", right-click the counter or `/pfl reset`. Drag it anywhere.
