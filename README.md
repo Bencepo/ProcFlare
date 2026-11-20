@@ -1,42 +1,35 @@
 # ProcFlare
 
-Lightweight proc alerts for WoW Forever.
+**Never miss a proc.** A big pulsing Clearcasting alert with sound and screen flash, and small icons with a countdown for weapon, trinket and talent procs. Nothing to set up.
 
 **Website and live demo:** https://bencepo.github.io/procflare/
 
-- **Clearcasting:** big pulsing icon above your character as long as the buff is up, with the seconds left, a sound and a short blue flash at the screen edges. Works for Omen of Clarity (druid), Arcane Concentration (mage) and Elemental Focus (shaman), and for Shadow Trance from Nightfall (warlock, in purple).
-- **Other procs:** weapon enchants such as Crusader, trinkets and talent procs show as small icons with a countdown and a softer sound. Nothing to set up: any new short buff that comes from you and that you did not cast yourself counts as a proc, so new weapons and trinkets are picked up on their own.
-- **Reactive abilities:** Overpower and Revenge (warrior), Riposte (rogue), Mongoose Bite and Counterattack (hunter) show for the few seconds after a dodge, parry or block opens them.
-- **Also in combat:** the known procs of your class (Flurry, Enrage, Vengeance, Redoubt, Remorseless Attacks, Quick Shots, Spirit Tap, Focused Casting, Nature's Grace) and Crusader are still found while the game hides buff details.
-- **Procs on your target:** debuffs your weapon or talents put on your target, such as Icy Chill or Spell Vulnerability.
-- **Proc counter (optional):** how often each proc fired in this fight and in the last fight. Starts over when you enter combat, or by hand.
-- **Mute what you do not need:** in move mode your recent procs are shown, right-click one to mute or unmute it.
+## What it does
 
-## Settings
+- **Clearcasting.** Big icon above your character while the buff is up, with a sound and a short flash. Druid, mage, shaman, and Shadow Trance for warlocks.
+- **Other procs.** Crusader, trinkets and talent procs as small icons with a countdown. New weapons and trinkets are picked up on their own.
+- **Reactive abilities.** Overpower, Revenge, Riposte, Mongoose Bite and Counterattack for the seconds they are open.
+- **Procs on your target.** Debuffs from your weapon or talents, such as Icy Chill.
+- **Own sound packs.** Melee and caster, with volume and sound channel.
+- **Proc counter.** Optional: how often each proc fired in this fight and the last one.
 
-Everything is set in ProcFlare's own window, no commands needed. Drag it anywhere: it stays open while you play, so every change shows at once.
+## How to use
 
-- **`/pfl`** (or `/procflare`): opens the window. `/pfl test` preview, `/pfl move` move mode, `/pfl reset` new proc count, `/pfl counter` counter on or off, `/pfl debug` debug output on or off
-- **Minimap button:** left-click the window, shift-click move mode, right-click preview
-- **Addon menu** next to the minimap
-- **Options > AddOns > ProcFlare** points to the window
+- `/pfl` or the minimap button opens the window. Drag it anywhere, changes apply live.
+- Move mode (shift-click the button): drag the alerts, right-click a proc to mute it.
 
-What you can change: sound pack (Melee or Caster, picked from your class), Clearcasting alert, its sound and the screen flash; volume and the game's sound channel it plays on; other procs and their sound; only your own procs; the longest buff that still counts as a proc (30 s by default); size; position; proc counter and when it starts over.
+## Good to know
 
-## Limits
-
-Procs that only deal damage (Fiery Weapon, Lifestealing) or grant an extra attack (Hand of Justice, Windfury) cannot be shown: Forever keeps the combat log from addons.
-
-Forever hides buff data from addons in restricted content (some boss encounters, battlegrounds). There ProcFlare still tries to show Clearcasting, other procs are not shown.
-
+- Procs that only deal damage (Fiery Weapon) or grant an extra attack (Hand of Justice, Windfury) cannot be shown: Forever keeps the combat log from addons.
+- In restricted content (some boss fights, battlegrounds) Forever hides buff data. ProcFlare still tries Clearcasting there.
 
 ## Feedback and bug reports
 
-Found a bug or have an idea? [Open an issue](https://github.com/Bencepo/ProcFlare/issues/new/choose), it takes a minute. For bugs the Lua error text (from BugSack, or `/console scriptErrors 1`) and your ProcFlare version help the most. No GitHub account? Comment on [CurseForge](https://www.curseforge.com/wow/addons/procflare#comments). Every report gets read.
+Found a bug or have an idea? [Open an issue](https://github.com/Bencepo/ProcFlare/issues/new/choose), it takes a minute. No GitHub account? Comment on [CurseForge](https://www.curseforge.com/wow/addons/procflare#comments). Every report gets read.
 
-## More addons by Bencepo
+## More from Bencepo
 
-All addons, live demos and the web pages: **https://bencepo.github.io**
+All addons, live demos and guides: **https://bencepo.github.io**
 
 Like the addons? Support them on Ko-fi: **https://ko-fi.com/bencepo**
 
