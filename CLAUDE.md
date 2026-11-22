@@ -19,6 +19,7 @@ ProcFlare: proc alerts for WoW Forever (Lua 5.1). Author and rights holder: Benc
 
 ## Rules
 
-- UI texts in English. Settings in the BencepoUI window, not in Blizzard's options.
+- English only: UI texts, commands, descriptions. No translations, no `Notes-xxXX` in the .toc. Settings in the BencepoUI window, not in Blizzard's options.
+- `Libs/BencepoUI` is shared by all Bencepo addons and must be the same file in each (canonical copy: minor 3, Nov 2026, with `UI:ShowLink` and the footer for "Report a bug"). LibStub loads only the highest minor, so two different copies with the same minor make the result depend on load order. Change it in one repo, bump the minor, copy it to the others.
 - CI runs luacheck and LuaLS with the WoW API annotations; LuaLS must report zero diagnostics or the release stops.
 - Release: new version heading at the top of `CHANGELOG.md`, push to `main`; the workflow uploads to CurseForge and Wago. Ben wants fast releases: after his test and go, straight to release. The release reaches players right away.

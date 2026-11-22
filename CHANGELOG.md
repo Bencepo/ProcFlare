@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.1
+
+- No Lua errors from buffs whose stack count or source the game hides from addons in combat: those buffs are now skipped like other hidden ones.
+- English only: the German description in the addon list is removed.
+- The shared settings window (BencepoUI) is now one version for all Bencepo addons. With several of them installed, every settings window looks and works the same, whichever addon loads first.
+- Code cleanup, no change in how procs are found or shown.
+
 ## 1.0.0
 
 - New icon in the addon list and on the minimap button, part of the new Bencepo logo family.

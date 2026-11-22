@@ -495,6 +495,12 @@ local function drawProcs()
 	end
 end
 
+-- A new proc goes first in the row; the oldest drops off when the row is full.
+local function pushProc(p)
+	table.insert(procs, 1, p)
+	procs[MAX_PROCS + 1] = nil
+end
+
 local driver = CreateFrame("Frame")
 driver:Hide()
 local scanReactive -- defined with the reactive abilities
@@ -511,7 +517,8 @@ local function readAura(unit, index, filter)
 	if not ok then return false end
 	if not a then return nil end
 	if issecret(a.spellId) or issecret(a.auraInstanceID) or issecret(a.duration)
-		or issecret(a.expirationTime) or issecret(a.name) then
+		or issecret(a.expirationTime) or issecret(a.name) or issecret(a.applications)
+		or issecret(a.isFromPlayerOrPlayerPet) then
 		return false
 	end
 	return a
@@ -642,8 +649,7 @@ scanReactive = function(now)
 		if open and r.closedSeen and not r.fired and not idx and not db.muted[r.id] then
 			r.fired = true
 			remember(r.id)
-			table.insert(procs, 1, { id = "r" .. r.id, spellId = r.id, icon = r.icon, expires = now + REACTIVE_WINDOW, reactive = true })
-			if procs[MAX_PROCS + 1] then procs[MAX_PROCS + 1] = nil end
+			pushProc({ id = "r" .. r.id, spellId = r.id, icon = r.icon, expires = now + REACTIVE_WINDOW, reactive = true })
 			playSound(db.procSound)
 			drawProcs()
 			slots[1].pop:Play()
@@ -715,8 +721,7 @@ local function scan()
 			if a.expirationTime then same.expires = a.expirationTime end
 		elseif not known[id] and a ~= ccAura and not baseline and isProc(a, now) and not isOwnSpell(a.spellId) then
 			remember(a.spellId)
-			table.insert(procs, 1, { id = id, spellId = a.spellId, icon = a.icon, expires = a.expirationTime })
-			if procs[MAX_PROCS + 1] then procs[MAX_PROCS + 1] = nil end
+			pushProc({ id = id, spellId = a.spellId, icon = a.icon, expires = a.expirationTime })
 			changed = true
 			playSound(db.procSound)
 			slots[1].pendingPop = true
@@ -759,8 +764,7 @@ local function scan()
 	for id, a in pairs(tPresent) do
 		if not knownTarget[id] and not targetBaseline and isProc(a, now, true) and not isOwnSpell(a.spellId) then
 			remember(a.spellId)
-			table.insert(procs, 1, { id = id, spellId = a.spellId, icon = a.icon, expires = a.expirationTime, target = true })
-			if procs[MAX_PROCS + 1] then procs[MAX_PROCS + 1] = nil end
+			pushProc({ id = id, spellId = a.spellId, icon = a.icon, expires = a.expirationTime, target = true })
 			playSound(db.procSound)
 			drawProcs()
 			slots[1].pop:Play()
@@ -830,8 +834,7 @@ end)
 local function preview()
 	previewUntil = GetTime() + 6
 	showCC({ auraInstanceID = -1, expirationTime = GetTime() + 15, applications = 1, icon = spellIcon(BIG_PROC.id) }, true)
-	table.insert(procs, 1, { id = -2, spellId = PREVIEW_PROC, icon = spellIcon(PREVIEW_PROC), expires = GetTime() + 15, preview = true })
-	if procs[MAX_PROCS + 1] then procs[MAX_PROCS + 1] = nil end
+	pushProc({ id = -2, spellId = PREVIEW_PROC, icon = spellIcon(PREVIEW_PROC), expires = GetTime() + 15, preview = true })
 	drawProcs()
 	if not moving then slots[1].pop:Play() end
 	C_Timer.After(0.6, function() playSound(db.procSound) end)
@@ -1053,7 +1056,6 @@ SlashCmdList.PROCFLARE = function(msg)
 	elseif msg == "move" then setMoving(not moving)
 	elseif msg == "reset" then newFight()
 	elseif msg == "counter" then db.counter = not db.counter; drawCounter(); if win then win:Refresh() end
-
 	else openOptions() end
 end
 

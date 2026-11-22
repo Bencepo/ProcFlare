@@ -1,7 +1,6 @@
 ## Interface: 16001
 ## Title: ProcFlare
 ## Notes: Lightweight proc alerts: big pulsing Clearcasting icon with sound and screen flash, small icons with countdown for weapon, trinket and talent procs.
-## Notes-deDE: Schlanke Proc-Hinweise: großes pulsierendes Freizaubern-Symbol mit Ton und Bildschirmblitz, kleine Symbole mit Countdown für Waffen-, Schmuck- und Talent-Procs.
 ## Author: Bencepo
 ## Version: @project-version@
 ## X-Website: https://bencepo.github.io/procflare/

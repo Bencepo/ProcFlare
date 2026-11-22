@@ -11,7 +11,7 @@
 --   win:Check(16, -60, "Label", "Tooltip", function() return db.x end, function(v) db.x = v end)
 --   win:Toggle()
 
-local UI = LibStub:NewLibrary("BencepoUI-1.0", 2)
+local UI = LibStub:NewLibrary("BencepoUI-1.0", 3)
 if not UI then return end
 
 local WHITE = "Interface\\Buttons\\WHITE8x8"
