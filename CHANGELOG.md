@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.2
+
+- The shared settings window (BencepoUI 4): the hint in its title row ("drag to move …") no longer runs into the title and version; it is shortened or left out when there is no room.
+
 ## 1.0.1
 
 - No Lua errors from buffs whose stack count or source the game hides from addons in combat: those buffs are now skipped like other hidden ones.
