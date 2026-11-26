@@ -46,10 +46,12 @@ local BIG = {
 	WARLOCK = { id = 17941, label = "Shadow Trance", color = { 0.75, 0.4, 1 } },
 }
 local BIG_PROC = BIG[CLASS] or BIG.DRUID
+local HAS_BIG = BIG[CLASS] ~= nil
 local BIG_COLOR = BIG_PROC.color or { 0.45, 0.75, 1 }
 local CC_IDS = { 16870, 12536, 16246, 17941 }
 local CC_SET = {}
 for _, id in ipairs(CC_IDS) do CC_SET[id] = true end
+local EMPTY = {}
 
 -- Abilities that only open up for a few seconds after a dodge, parry or block. The
 -- first id names the spell; any rank known counts. Only the player's class is used.
@@ -74,7 +76,7 @@ local WATCH = {
 }
 local watchList = {}
 for _, key in ipairs({ "ALL", CLASS }) do
-	for _, id in ipairs(WATCH[key] or {}) do watchList[#watchList + 1] = id end
+	for _, id in ipairs(WATCH[key] or EMPTY) do watchList[#watchList + 1] = id end
 end
 
 -- ProcFlare's own sounds, in four volume steps each (Sounds/<name>_<volume>.ogg).
@@ -121,8 +123,15 @@ local db
 
 local function spellName(id) return C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(id) end
 local function spellIcon(id) return C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(id) end
-local function playSound(id)
+
+local lastSoundAt = {}
+local function playSound(id, force)
 	if not id or id == 0 then return end
+	if not force then
+		local now = GetTime()
+		if lastSoundAt[id] and now - lastSoundAt[id] < 0.12 then return end
+		lastSoundAt[id] = now
+	end
 	local channel = (db and db.channel) or "SFX"
 	if SOUND_FILES[id] then
 		local v = (db and tonumber(db.volume)) or 100
@@ -384,6 +393,13 @@ local function buildCounter()
 	counterFrame = f
 end
 
+local counterIds, counterList = {}, {}
+local function sortCounter(a, b)
+	if a.cur ~= b.cur then return a.cur > b.cur end
+	if a.last ~= b.last then return a.last > b.last end
+	return a.id < b.id
+end
+
 drawCounter = function()
 	if not db then return end
 	if not db.counter then
@@ -391,18 +407,17 @@ drawCounter = function()
 		return
 	end
 	if not counterFrame then buildCounter() end
-	local ids, list = {}, {}
-	for id in pairs(fight) do ids[id] = true end
-	for id in pairs(lastFight) do ids[id] = true end
-	for id in pairs(ids) do list[#list + 1] = { id = id, cur = fight[id] or 0, last = lastFight[id] or 0 } end
-	table.sort(list, function(a, b)
-		if a.cur ~= b.cur then return a.cur > b.cur end
-		if a.last ~= b.last then return a.last > b.last end
-		return a.id < b.id
-	end)
-	local n = math.min(#list, COUNTER_ROWS)
+	wipe(counterIds)
+	wipe(counterList)
+	for id in pairs(fight) do counterIds[id] = true end
+	for id in pairs(lastFight) do counterIds[id] = true end
+	for id in pairs(counterIds) do
+		counterList[#counterList + 1] = { id = id, cur = fight[id] or 0, last = lastFight[id] or 0 }
+	end
+	table.sort(counterList, sortCounter)
+	local n = math.min(#counterList, COUNTER_ROWS)
 	for i = 1, COUNTER_ROWS do
-		local r, e = counterFrame.rows[i], list[i]
+		local r, e = counterFrame.rows[i], counterList[i]
 		if e and i <= n then
 			r.icon:SetTexture(spellIcon(e.id))
 			r.name:SetText(spellName(e.id) or e.id)
@@ -419,13 +434,16 @@ drawCounter = function()
 end
 
 ---------------------------------------------------------------- state
-local known = {}       -- auraInstanceID -> true, buffs seen in the last scan
+local known, presentBuf = {}, {}           -- auraInstanceID -> aura, swapped each player scan
+local knownTarget, tPresentBuf = {}, {}    -- auraInstanceID -> aura, swapped each target scan
+local bySpellBuf = {}                      -- scratch set for watched buffs
 local procs = {}       -- shown procs: { id, spellId, icon, expires }
 local ccState          -- shown Clearcasting: { id, expires, count }
+local ccStatePool = {} -- reused table for ccState
+local ccLastSec, ccLastCount
 local baseline = true  -- next scan only learns what is there, without alerts
 local restricted = false
 local recentCasts = {} -- spell name -> time of your last cast
-local knownTarget = {}  -- auraInstanceID -> true, your debuffs on the target in the last scan
 local targetBaseline = true
 local previewUntil
 
@@ -457,7 +475,10 @@ local function showCC(a, alert)
 		and a.expirationTime > ccState.expires + 0.5
 	-- -10: found while buff details are hidden, so the id is unknown
 	local new = not ccState or (ccState.id ~= a.auraInstanceID and ccState.id ~= -10 and a.auraInstanceID ~= -10)
-	ccState = { id = a.auraInstanceID, expires = a.expirationTime, count = a.applications }
+	ccStatePool.id = a.auraInstanceID
+	ccStatePool.expires = a.expirationTime
+	ccStatePool.count = a.applications
+	ccState = ccStatePool
 	if a.icon then cc.icon:SetTexture(a.icon) end
 	cc:Show()
 	if not pulse:IsPlaying() then pulse:Play() end
@@ -471,12 +492,16 @@ end
 
 local function hideCC()
 	ccState = nil
+	ccLastSec, ccLastCount = nil, nil
+	cc.time:SetText("")
+	cc.count:SetText("")
 	pulse:Stop()
 	cc:Hide()
 end
 
 local function drawProcs()
 	if moving then return end
+	local n = #procs
 	for i = 1, MAX_PROCS do
 		local f, p = slots[i], procs[i]
 		if p then
@@ -485,11 +510,12 @@ local function drawProcs()
 			f.icon:SetDesaturated(false)
 			f.name:SetText("")
 			f:ClearAllPoints()
-			local n = #procs
 			f:SetPoint("TOP", anchor, "BOTTOM", (i - (n + 1) / 2) * 44, -30)
 			f:Show()
 		else
 			f.spellId = nil
+			f.hadTime = false
+			f.time:SetText("")
 			f:Hide()
 		end
 	end
@@ -542,7 +568,33 @@ local CAST_PROBES = {   -- spells whose cast time drops to 0 with the big proc
 	WARLOCK = { 686 }, -- Shadow Bolt (Shadow Trance)
 }
 local probeCast = {}
-local playerClass = CLASS
+local knownCostProbes, knownCastProbes = {}, {}
+local hiddenCCResult = { auraInstanceID = -10 }
+
+local function buildProbes()
+	wipe(knownCostProbes)
+	local costIds = PROBES[CLASS]
+	if costIds then
+		for i = 1, #costIds do
+			local id = costIds[i]
+			if isOwnSpell(id) then
+				local name = spellName(id)
+				if name then knownCostProbes[#knownCostProbes + 1] = name end
+			end
+		end
+	end
+	wipe(knownCastProbes)
+	local castIds = CAST_PROBES[CLASS]
+	if castIds then
+		for i = 1, #castIds do
+			local id = castIds[i]
+			if isOwnSpell(id) then
+				local name = spellName(id)
+				if name then knownCastProbes[#knownCastProbes + 1] = name end
+			end
+		end
+	end
+end
 
 local function castTimeOf(name)
 	if not (C_Spell and C_Spell.GetSpellInfo) then return nil end
@@ -563,39 +615,55 @@ local function costOf(name)
 end
 
 local function hiddenCC()
-	-- direct lookup by spell (works when Clearcasting itself is not hidden)
-	for _, id in ipairs(CC_IDS) do
-		local ok, a = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
-		if ok and a then
-			return { auraInstanceID = -10,
-				expirationTime = not issecret(a.expirationTime) and a.expirationTime or nil,
-				applications = not issecret(a.applications) and a.applications or nil }, "spell id"
-		end
+	if not (HAS_BIG and db.clearcasting) then return nil end
+	-- direct lookup by this class's big-proc spell ID
+	local ok, a = pcall(C_UnitAuras.GetPlayerAuraBySpellID, BIG_PROC.id)
+	if ok and a then
+		hiddenCCResult.auraInstanceID = -10
+		hiddenCCResult.expirationTime = not issecret(a.expirationTime) and a.expirationTime or nil
+		hiddenCCResult.applications = not issecret(a.applications) and a.applications or nil
+		return hiddenCCResult, "spell id"
 	end
 	if C_UnitAuras.GetAuraDataBySpellName then
-		local ok, a = pcall(C_UnitAuras.GetAuraDataBySpellName, "player", CC_NAME, "HELPFUL")
-		if ok and a then return { auraInstanceID = -10 }, "spell name" end
+		local okN, aN = pcall(C_UnitAuras.GetAuraDataBySpellName, "player", CC_NAME, "HELPFUL")
+		if okN and aN then
+			hiddenCCResult.auraInstanceID = -10
+			hiddenCCResult.expirationTime = nil
+			hiddenCCResult.applications = nil
+			return hiddenCCResult, "spell name"
+		end
 	end
-	if overlayCC then return { auraInstanceID = -10 }, "proc glow" end
+	if overlayCC then
+		hiddenCCResult.auraInstanceID = -10
+		hiddenCCResult.expirationTime = nil
+		hiddenCCResult.applications = nil
+		return hiddenCCResult, "proc glow"
+	end
 	-- ability costs: an ability that normally costs something is free
-	for _, id in ipairs(PROBES[playerClass] or {}) do
-		local name = spellName(id)
-		if name and isOwnSpell(id) then
-			local c = costOf(name)
-			if c then
-				if c > (probeCost[name] or 0) then probeCost[name] = c end
-				if c == 0 and (probeCost[name] or 0) > 0 then return { auraInstanceID = -10 }, "free " .. name end
+	for i = 1, #knownCostProbes do
+		local name = knownCostProbes[i]
+		local c = costOf(name)
+		if c then
+			if c > (probeCost[name] or 0) then probeCost[name] = c end
+			if c == 0 and (probeCost[name] or 0) > 0 then
+				hiddenCCResult.auraInstanceID = -10
+				hiddenCCResult.expirationTime = nil
+				hiddenCCResult.applications = nil
+				return hiddenCCResult, db.debug and ("free " .. name) or "free"
 			end
 		end
 	end
 	-- cast time: a spell that normally has one is instant
-	for _, id in ipairs(CAST_PROBES[playerClass] or {}) do
-		local name = spellName(id)
-		if name and isOwnSpell(id) then
-			local t = castTimeOf(name)
-			if t then
-				if t > (probeCast[name] or 0) then probeCast[name] = t end
-				if t == 0 and (probeCast[name] or 0) > 0 then return { auraInstanceID = -10 }, "instant " .. name end
+	for i = 1, #knownCastProbes do
+		local name = knownCastProbes[i]
+		local t = castTimeOf(name)
+		if t then
+			if t > (probeCast[name] or 0) then probeCast[name] = t end
+			if t == 0 and (probeCast[name] or 0) > 0 then
+				hiddenCCResult.auraInstanceID = -10
+				hiddenCCResult.expirationTime = nil
+				hiddenCCResult.applications = nil
+				return hiddenCCResult, db.debug and ("instant " .. name) or "instant"
 			end
 		end
 	end
@@ -611,16 +679,27 @@ local function debugCC(source)
 end
 
 -- Reactive abilities (Overpower, Revenge, Riposte, Mongoose Bite, Counterattack).
-local reactives = {}      -- the class's abilities that are known: { id, name, icon, ids }
+local reactives = {}      -- the class's abilities that are known: { id, name, icon, closedSeen, fired, glow }
 local reactiveById = {}   -- any rank id -> entry
 local function buildReactives()
+	-- Preserve state across SPELLS_CHANGED (e.g. Warrior stance swaps).
+	local prevById = {}
+	for i = 1, #reactives do prevById[reactives[i].id] = reactives[i] end
 	reactives, reactiveById = {}, {}
-	for _, ids in ipairs(REACTIVE[playerClass] or {}) do
+	for _, ids in ipairs(REACTIVE[CLASS] or EMPTY) do
 		local isKnown = false
-		for _, id in ipairs(ids) do if isOwnSpell(id) then isKnown = true end end
+		for _, id in ipairs(ids) do
+			if isOwnSpell(id) then isKnown = true; break end
+		end
 		local name = spellName(ids[1])
 		if isKnown and name then
-			local r = { id = ids[1], name = name, icon = spellIcon(ids[1]) }
+			local r = prevById[ids[1]]
+			if r then
+				r.name = name
+				r.icon = spellIcon(ids[1])
+			else
+				r = { id = ids[1], name = name, icon = spellIcon(ids[1]) }
+			end
 			reactives[#reactives + 1] = r
 			for _, id in ipairs(ids) do reactiveById[id] = r end
 		end
@@ -638,33 +717,37 @@ local function reactiveOpen(r)
 end
 
 scanReactive = function(now)
-	for _, r in ipairs(reactives) do
+	local changed = false
+	for i = 1, #reactives do
+		local r = reactives[i]
 		local open = db.procs and db.reactive and reactiveOpen(r)
 		-- only a change counts: a client that always reports "usable" never alerts
 		if not open then r.closedSeen = true end
 		local idx
-		for j, p in ipairs(procs) do
-			if p.reactive and p.spellId == r.id then idx = j end
+		for j = 1, #procs do
+			local p = procs[j]
+			if p.reactive and p.spellId == r.id then idx = j; break end
 		end
 		if open and r.closedSeen and not r.fired and not idx and not db.muted[r.id] then
 			r.fired = true
 			remember(r.id)
 			pushProc({ id = "r" .. r.id, spellId = r.id, icon = r.icon, expires = now + REACTIVE_WINDOW, reactive = true })
 			playSound(db.procSound)
-			drawProcs()
-			slots[1].pop:Play()
+			slots[1].pendingPop = true
+			changed = true
 		elseif idx and (not open or procs[idx].expires < now) then
 			table.remove(procs, idx)
-			drawProcs()
+			changed = true
 		end
 		if not open then r.fired = false end
 	end
+	return changed
 end
 
-local function scan()
-	if not db then return end
-	local now = GetTime()
-	local present, ccAura, ccSource, hidden = {}, nil, nil, 0
+local function scanPlayer(now)
+	local present = presentBuf
+	wipe(present)
+	local ccAura, ccSource, hidden = nil, nil, 0
 	for i = 1, 40 do
 		local a = readAura("player", i, "HELPFUL")
 		if a == nil then break end
@@ -672,19 +755,20 @@ local function scan()
 			hidden = hidden + 1
 		elseif a then
 			present[a.auraInstanceID] = a
-			if CC_SET[a.spellId] or a.name == CC_NAME then ccAura, ccSource = a, "buff" end
+			if HAS_BIG and (CC_SET[a.spellId] or a.name == CC_NAME) then ccAura, ccSource = a, "buff" end
 		end
 	end
 	-- Known proc buffs of the class, asked for by spell id while details are hidden.
 	if hidden > 0 and db.procs then
 		-- skip what is already seen: in the list now, or before and not run out yet
-		local bySpell = {}
-		for _, a in pairs(present) do bySpell[a.spellId] = true end
+		wipe(bySpellBuf)
+		for _, a in pairs(present) do bySpellBuf[a.spellId] = true end
 		for _, a in pairs(known) do
-			if not a.watched and a.expirationTime and a.expirationTime > now then bySpell[a.spellId] = true end
+			if not a.watched and a.expirationTime and a.expirationTime > now then bySpellBuf[a.spellId] = true end
 		end
-		for _, id in ipairs(watchList) do
-			if not bySpell[id] then
+		for i = 1, #watchList do
+			local id = watchList[i]
+			if not bySpellBuf[id] then
 				local ok, a = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
 				if ok and a then
 					local key = "w" .. id
@@ -694,27 +778,28 @@ local function scan()
 			end
 		end
 	end
-	if not ccAura then
+	if HAS_BIG and db.clearcasting and not ccAura then
 		-- Look the other ways even when nothing seems hidden: some clients drop
 		-- hidden buffs from the list without saying so.
 		ccAura, ccSource = hiddenCC()
-		if ccAura and ccState and ccState.id ~= -10 then ccAura.auraInstanceID = ccState.id end
+		if ccAura and ccState and ccState.id ~= -10 and ccState.id ~= -1 then ccAura.auraInstanceID = ccState.id end
 	end
 	restricted = hidden > 0
-	debugCC(ccAura and ccSource)
+	if HAS_BIG then debugCC(ccAura and ccSource) end
 
 	-- Procs: buffs that are new since the last scan. While buffs are hidden,
 	-- the ones seen before are kept, so they do not count as new afterwards.
 	local changed = false
 	for id, a in pairs(present) do
 		local same
-		for _, p in ipairs(procs) do
-			if p.spellId == a.spellId and not p.target and not p.reactive then same = p end
+		for j = 1, #procs do
+			local p = procs[j]
+			if p.spellId == a.spellId and not p.target and not p.reactive and not p.preview then same = p; break end
 		end
 		if same then
 			-- the same buff, seen once by spell id and once in the list: keep one icon
 			-- a new proc while the buff is still up only renews it: count it all the same
-			if not same.preview and a.expirationTime and same.expires and a.expirationTime > same.expires + 0.5 then
+			if a.expirationTime and same.expires and a.expirationTime > same.expires + 0.5 then
 				countProc(a.spellId)
 			end
 			same.id = id
@@ -729,7 +814,6 @@ local function scan()
 	end
 	for j = #procs, 1, -1 do
 		local p = procs[j]
-		-- procs on the target are handled with the target scan below
 		if p.preview then
 			if not previewUntil then table.remove(procs, j); changed = true end
 		elseif not p.target and not p.reactive then
@@ -741,10 +825,6 @@ local function scan()
 			end
 		end
 	end
-	if changed then
-		drawProcs()
-		if slots[1].pendingPop then slots[1].pendingPop = nil; slots[1].pop:Play() end
-	end
 
 	if db.clearcasting and ccAura then
 		showCC(ccAura, not baseline)
@@ -752,8 +832,18 @@ local function scan()
 		hideCC()
 	end
 
-	-- Debuff procs on your target (e.g. Icy Chill, Spell Vulnerability).
-	local tPresent, tHidden = {}, false
+	if hidden > 0 then
+		for id, a in pairs(known) do if not present[id] then present[id] = a end end
+	end
+	known, presentBuf = present, known
+	baseline = false
+	return changed
+end
+
+local function scanTarget(now)
+	local tPresent = tPresentBuf
+	wipe(tPresent)
+	local tHidden = false
 	if db.procs and db.targetProcs and UnitExists("target") then
 		for j = 1, 40 do
 			local a = readAura("target", j, "HARMFUL|PLAYER")
@@ -761,19 +851,32 @@ local function scan()
 			if a == false then tHidden = true elseif a then tPresent[a.auraInstanceID] = a end
 		end
 	end
+	local changed = false
 	for id, a in pairs(tPresent) do
-		if not knownTarget[id] and not targetBaseline and isProc(a, now, true) and not isOwnSpell(a.spellId) then
+		local same
+		for j = 1, #procs do
+			local p = procs[j]
+			if p.target and p.spellId == a.spellId and not p.preview then same = p; break end
+		end
+		if same then
+			if a.expirationTime and same.expires and a.expirationTime > same.expires + 0.5 then
+				countProc(a.spellId)
+			end
+			same.id = id
+			if a.expirationTime then same.expires = a.expirationTime end
+		elseif not knownTarget[id] and not targetBaseline and isProc(a, now, true) and not isOwnSpell(a.spellId) then
 			remember(a.spellId)
 			pushProc({ id = id, spellId = a.spellId, icon = a.icon, expires = a.expirationTime, target = true })
 			playSound(db.procSound)
-			drawProcs()
-			slots[1].pop:Play()
+			slots[1].pendingPop = true
+			changed = true
 		end
 	end
 	for j = #procs, 1, -1 do
 		local p = procs[j]
 		if p.target and not tPresent[p.id] and (not tHidden or (p.expires and p.expires < now)) then
-			table.remove(procs, j); drawProcs()
+			table.remove(procs, j)
+			changed = true
 		elseif p.target and tPresent[p.id] then
 			p.expires = tPresent[p.id].expirationTime
 		end
@@ -781,16 +884,25 @@ local function scan()
 	if tHidden then
 		for id, a in pairs(knownTarget) do if not tPresent[id] then tPresent[id] = a end end
 	end
-	knownTarget = tPresent
+	knownTarget, tPresentBuf = tPresent, knownTarget
 	targetBaseline = false
+	return changed
+end
 
-	scanReactive(now)
-
-	if hidden > 0 then
-		for id, a in pairs(known) do if not present[id] then present[id] = a end end
+local function scan(doPlayer, doTarget, doReactive)
+	if not db then return end
+	if doPlayer == nil and doTarget == nil and doReactive == nil then
+		doPlayer, doTarget, doReactive = true, true, true
 	end
-	known = present
-	baseline = false
+	local now = GetTime()
+	local changed = false
+	if doPlayer and scanPlayer(now) then changed = true end
+	if doTarget and scanTarget(now) then changed = true end
+	if doReactive and #reactives > 0 and scanReactive(now) then changed = true end
+	if changed then
+		drawProcs()
+		if slots[1].pendingPop then slots[1].pendingPop = nil; slots[1].pop:Play() end
+	end
 	if ccState or #procs > 0 then driver:Show() end
 end
 
@@ -806,10 +918,12 @@ driver:SetScript("OnUpdate", function(self, elapsed)
 	local now = GetTime()
 	if previewUntil and now > previewUntil then
 		previewUntil = nil
-		pcall(scan)
+		pcall(scan, true, true, true)
 	elseif recheckSum >= 0.5 and not previewUntil then
 		recheckSum = 0
-		pcall(scan)
+		local needTarget = false
+		for i = 1, #procs do if procs[i].target then needTarget = true; break end end
+		pcall(scan, ccState ~= nil or #procs > 0, needTarget, #reactives > 0)
 	end
 	-- An expired buff never stays on screen, even if no update arrives.
 	if ccState and ccState.expires and ccState.expires > 0 and ccState.expires < now and not previewUntil then
@@ -817,27 +931,49 @@ driver:SetScript("OnUpdate", function(self, elapsed)
 	end
 	if ccState then
 		local e = ccState.expires
-		cc.time:SetText(e and e > now and string.format("%.0f", e - now) or "")
-		cc.count:SetText(ccState.count and ccState.count > 1 and ccState.count or "")
+		local sec = (e and e > now) and math.floor(e - now + 0.5) or -1
+		if sec ~= ccLastSec then
+			ccLastSec = sec
+			cc.time:SetText(sec >= 0 and tostring(sec) or "")
+		end
+		local cnt = (ccState.count and ccState.count > 1) and ccState.count or 0
+		if cnt ~= ccLastCount then
+			ccLastCount = cnt
+			cc.count:SetText(cnt > 0 and tostring(cnt) or "")
+		end
 	end
 	-- move mode owns the slots
 	if not moving then
-		for i, p in ipairs(procs) do
+		for i = 1, #procs do
+			local p, f = procs[i], slots[i]
 			local e = p.expires
-			slots[i].time:SetText(e and e > now and string.format("%.1f", e - now) or "")
+			if e and e > now then
+				f.time:SetText(string.format("%.1f", e - now))
+				f.hadTime = true
+			elseif f.hadTime then
+				f.time:SetText("")
+				f.hadTime = false
+			end
 		end
 	end
 	if not ccState and #procs == 0 and not previewUntil then self:Hide() end
 end)
 
 ---------------------------------------------------------------- preview, move mode
+local function previewSound()
+	playSound(db.procSound, true)
+end
+
 local function preview()
 	previewUntil = GetTime() + 6
+	for j = #procs, 1, -1 do
+		if procs[j].preview then table.remove(procs, j) end
+	end
 	showCC({ auraInstanceID = -1, expirationTime = GetTime() + 15, applications = 1, icon = spellIcon(BIG_PROC.id) }, true)
 	pushProc({ id = -2, spellId = PREVIEW_PROC, icon = spellIcon(PREVIEW_PROC), expires = GetTime() + 15, preview = true })
 	drawProcs()
 	if not moving then slots[1].pop:Play() end
-	C_Timer.After(0.6, function() playSound(db.procSound) end)
+	C_Timer.After(0.6, previewSound)
 	driver:Show()
 end
 
@@ -852,6 +988,7 @@ refreshMoveMode = function()
 	end
 	table.sort(list, function(a, b) return a.t > b.t end)
 	if #list == 0 then list[1] = { id = PREVIEW_PROC } end
+	local n = math.min(#list, MAX_PROCS)
 	for i = 1, MAX_PROCS do
 		local f, e = slots[i], list[i]
 		if e then
@@ -861,7 +998,6 @@ refreshMoveMode = function()
 			f.time:SetText(db.muted[e.id] and "|cffff4040muted|r" or "")
 			f.name:SetText(spellName(e.id) or "")
 			f:ClearAllPoints()
-			local n = math.min(#list, MAX_PROCS)
 			f:SetPoint("TOP", anchor, "BOTTOM", (i - (n + 1) / 2) * 76, -30)
 			f:EnableMouse(true)
 			f:Show()
@@ -886,6 +1022,7 @@ local function setMoving(on)
 			f:EnableMouse(false)
 			f.name:SetText("")
 			f.time:SetText("")
+			f.hadTime = false
 		end
 		if not ccState then cc:Hide() end
 		drawProcs()
@@ -933,14 +1070,14 @@ local function buildWindow()
 	win:Header(L, -48, "Alerts")
 	win:Check(L, -72, BIG_PROC.label .. " alert", "Big pulsing icon while " .. BIG_PROC.label
 		.. " is up (Clearcasting for druids, mages and shamans, Shadow Trance from Nightfall for warlocks).",
-		opt("clearcasting", function() pcall(scan) end))
+		opt("clearcasting", function() pcall(scan, true, false, false) end))
 	win:Check(L, -96, "Screen flash", "Short blue flash at the screen edges when Clearcasting procs.", opt("flash"))
 	win:Check(L, -120, "Other procs", "Small icons with countdown for weapon, trinket and talent procs.", opt("procs"))
 	win:Check(L, -144, "Procs on the target", "Debuffs your weapon or talents put on your target, e.g. Icy Chill or Spell Vulnerability.",
-		opt("targetProcs", function() pcall(scan) end))
+		opt("targetProcs", function() pcall(scan, false, true, false) end))
 	win:Check(L, -168, "Only my own procs", "Ignore short buffs other players put on you.", opt("onlyMine"))
 	win:Check(L, -192, "Reactive abilities", "Overpower and Revenge (warrior), Riposte (rogue), Mongoose Bite and Counterattack (hunter): "
-		.. "shown for the few seconds after a dodge, parry or block opens them. Only your class's ones.", opt("reactive", function() pcall(scan) end))
+		.. "shown for the few seconds after a dodge, parry or block opens them. Only your class's ones.", opt("reactive", function() pcall(scan, false, false, true) end))
 	win:Check(L, -216, "Minimap button", "Show the ProcFlare button at the minimap.", opt("showMinimap", applyMinimap))
 	win:Slider(L, -248, "Longest proc", 5, 120, 5, function() return db.maxDuration end,
 		function(v) db.maxDuration = v end, "Buffs up to this many seconds count as procs.", 170,
@@ -958,18 +1095,18 @@ local function buildWindow()
 		local p = PACKS[v]
 		if not p then return end
 		db.pack, db.ccSound, db.procSound = v, p.cc, p.proc
-		playSound(p.cc)
+		playSound(p.cc, true)
 	end, "Melee: drums, horns and steel. Caster: arcane, frost and fire. Sets both sounds below; each can still be changed.")
 	win:Dropdown(R, -116, "Clearcasting sound", 220, SOUNDS, function() return db.ccSound end,
-		function(v) db.ccSound = v; playSound(v) end, "Sound when Clearcasting procs.")
+		function(v) db.ccSound = v; playSound(v, true) end, "Sound when Clearcasting procs.")
 	win:Dropdown(R, -162, "Proc sound", 220, SOUNDS, function() return db.procSound end,
-		function(v) db.procSound = v; playSound(v) end, "Sound when another proc fires.")
+		function(v) db.procSound = v; playSound(v, true) end, "Sound when another proc fires.")
 	win:Slider(R, -210, "Volume", 25, 100, 25, function() return db.volume end,
-		function(v) db.volume = v; playSound(db.ccSound) end,
+		function(v) db.volume = v; playSound(db.ccSound, true) end,
 		"Volume of ProcFlare's own sounds. The game's volume slider for the sound channel applies on top.", 170,
 		function(v) return v .. " %" end)
 	win:Dropdown(R, -250, "Sound channel", 220, CHANNELS, function() return db.channel end,
-		function(v) db.channel = v; playSound(db.ccSound) end,
+		function(v) db.channel = v; playSound(db.ccSound, true) end,
 		"Which of the game's volume sliders (System > Audio) controls ProcFlare's sounds.")
 
 	-- bottom: preview and position
@@ -995,6 +1132,7 @@ local function buildWindow()
 end
 
 local function openOptions()
+	if not db then return end
 	if not win then buildWindow() end
 	win:Toggle()
 end
@@ -1006,6 +1144,7 @@ local function registerSettings()
 	if layoutCat and CreateSettingsButtonInitializer then
 		layoutCat:AddInitializer(CreateSettingsButtonInitializer("ProcFlare has its own window", "Open", function()
 			if SettingsPanel and SettingsPanel:IsShown() then HideUIPanel(SettingsPanel) end
+			if not db then return end
 			if not win then buildWindow() end
 			win:Show()
 		end, "Opens the ProcFlare window. It can be dragged anywhere and stays open while you play.", true))
@@ -1048,6 +1187,7 @@ end
 SLASH_PROCFLARE1 = "/procflare"
 SLASH_PROCFLARE2 = "/pfl"
 SlashCmdList.PROCFLARE = function(msg)
+	if not db then return end
 	msg = strtrim(msg or ""):lower()
 	if msg == "test" then preview()
 	elseif msg == "debug" then
@@ -1060,16 +1200,39 @@ SlashCmdList.PROCFLARE = function(msg)
 end
 
 ---------------------------------------------------------------- events
+local HAS_PROBES = (PROBES[CLASS] ~= nil) or (CAST_PROBES[CLASS] ~= nil)
+local HAS_USABLE_CLASS = HAS_PROBES or (REACTIVE[CLASS] ~= nil)
+
 local scanQueued = false
+local dirtyPlayer, dirtyTarget, dirtyReactive = false, false, false
 local usablePending = false
-local function queueScan()
+
+local function runQueuedScan()
+	scanQueued = false
+	local dp, dt, dr = dirtyPlayer, dirtyTarget, dirtyReactive
+	dirtyPlayer, dirtyTarget, dirtyReactive = false, false, false
+	local ok, err = pcall(scan, dp, dt, dr)
+	if not ok and db and db.debug then print("|cff4fb3ffProcFlare:|r " .. tostring(err)) end
+end
+
+local function queueScan(p, t, r)
+	if p == nil and t == nil and r == nil then p, t, r = true, true, true end
+	if p then dirtyPlayer = true end
+	if t then dirtyTarget = true end
+	if r then dirtyReactive = true end
 	if scanQueued then return end
 	scanQueued = true
-	C_Timer.After(0, function()
-		scanQueued = false
-		local ok, err = pcall(scan)
-		if not ok and db and db.debug then print("|cff4fb3ffProcFlare:|r " .. tostring(err)) end
-	end)
+	C_Timer.After(0, runQueuedScan)
+end
+
+local function runUsableScan()
+	usablePending = false
+	if not db then return end
+	local wantPlayer = HAS_PROBES and db.clearcasting
+	local wantReactive = db.procs and db.reactive and #reactives > 0
+	if wantPlayer or wantReactive then
+		queueScan(wantPlayer, false, wantReactive)
+	end
 end
 
 local events = CreateFrame("Frame")
@@ -1078,6 +1241,7 @@ events:RegisterEvent("PLAYER_ENTERING_WORLD")
 events:RegisterEvent("PLAYER_REGEN_ENABLED")
 events:SetScript("OnEvent", function(self, event, arg1, _, arg3)
 	if event == "ADDON_LOADED" and arg1 == ADDON then
+		self:UnregisterEvent("ADDON_LOADED")
 		ProcFlareDB = ProcFlareDB or {}
 		db = ProcFlareDB
 		for k, v in pairs(DEFAULTS) do
@@ -1098,19 +1262,26 @@ events:SetScript("OnEvent", function(self, event, arg1, _, arg3)
 		self:RegisterUnitEvent("UNIT_AURA", "player", "target")
 		self:RegisterEvent("PLAYER_TARGET_CHANGED")
 		self:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
-		-- The game's own proc glow and ability usability change with Clearcasting.
-		for _, e in ipairs({ "SPELL_ACTIVATION_OVERLAY_SHOW", "SPELL_ACTIVATION_OVERLAY_HIDE",
-			"SPELL_ACTIVATION_OVERLAY_GLOW_SHOW", "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE", "SPELL_UPDATE_USABLE",
-			"ACTIONBAR_UPDATE_USABLE", "SPELLS_CHANGED",
-			"PLAYER_REGEN_DISABLED" }) do
+		-- The game's own proc glow and ability usability change with Clearcasting / reactives.
+		local extraEvents = { "SPELL_ACTIVATION_OVERLAY_SHOW", "SPELL_ACTIVATION_OVERLAY_HIDE",
+			"SPELL_ACTIVATION_OVERLAY_GLOW_SHOW", "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE",
+			"SPELLS_CHANGED", "PLAYER_REGEN_DISABLED" }
+		if HAS_USABLE_CLASS then
+			extraEvents[#extraEvents + 1] = "SPELL_UPDATE_USABLE"
+			extraEvents[#extraEvents + 1] = "ACTIONBAR_UPDATE_USABLE"
+		end
+		for _, e in ipairs(extraEvents) do
 			pcall(self.RegisterEvent, self, e)
 		end
 	elseif event == "SPELLS_CHANGED" then
 		buildReactives()
+		buildProbes()
 	elseif event == "PLAYER_ENTERING_WORLD" then
 		buildReactives()
+		buildProbes()
 		baseline = true
-		queueScan()
+		targetBaseline = true
+		queueScan(true, true, true)
 		-- 0.2.0: pick the sound pack once from class and talents, unless sounds were picked by hand.
 		if not db.packPicked then
 			C_Timer.After(3, function()
@@ -1122,35 +1293,62 @@ events:SetScript("OnEvent", function(self, event, arg1, _, arg3)
 				if untouched[db.procSound] then db.procSound = PACKS[db.pack].proc end
 			end)
 		end
-	elseif event == "UNIT_AURA" or event == "PLAYER_REGEN_ENABLED" or event == "PLAYER_REGEN_DISABLED" then
+	elseif event == "UNIT_AURA" then
+		if arg1 == "target" then
+			if db.procs and db.targetProcs then queueScan(false, true, false) end
+		else
+			queueScan(true, false, false)
+		end
+	elseif event == "PLAYER_REGEN_ENABLED" or event == "PLAYER_REGEN_DISABLED" then
 		if event == "PLAYER_REGEN_DISABLED" and db.counterReset then newFight() end
-		queueScan()
+		queueScan(true, db.procs and db.targetProcs, #reactives > 0)
 	elseif event == "SPELL_UPDATE_USABLE" or event == "ACTIONBAR_UPDATE_USABLE" then
 		-- Fires on every resource change. Only needed to see the big proc through free or
 		-- instant spells and the reactive abilities: one scan 0.1 s after the first of a burst.
-		if (PROBES[playerClass] or CAST_PROBES[playerClass] or #reactives > 0) and not usablePending then
+		if not usablePending and ((HAS_PROBES and db.clearcasting) or (db.procs and db.reactive and #reactives > 0)) then
 			usablePending = true
-			C_Timer.After(0.1, function()
-				usablePending = false
-				queueScan()
-			end)
+			C_Timer.After(0.1, runUsableScan)
 		end
 	elseif event == "SPELL_ACTIVATION_OVERLAY_SHOW" or event == "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW" then
 		if db.debug then print("|cff4fb3ffProcFlare:|r " .. event .. " " .. tostring(not issecret(arg1) and arg1 or "?")) end
-		if arg1 and not issecret(arg1) and (CC_SET[arg1] or spellName(arg1) == CC_NAME) then overlayCC = true end
-		if arg1 and not issecret(arg1) and reactiveById[arg1] then reactiveById[arg1].glow = true end
-		queueScan()
+		local wantP, wantR = false, false
+		if HAS_BIG and arg1 and not issecret(arg1) and (CC_SET[arg1] or spellName(arg1) == CC_NAME) then
+			overlayCC = true
+			wantP = true
+		end
+		if arg1 and not issecret(arg1) and reactiveById[arg1] then
+			reactiveById[arg1].glow = true
+			wantR = true
+		end
+		if wantP or wantR then queueScan(wantP, false, wantR) end
 	elseif event == "SPELL_ACTIVATION_OVERLAY_HIDE" or event == "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE" then
-		if not arg1 or issecret(arg1) or CC_SET[arg1] or spellName(arg1) == CC_NAME then overlayCC = false end
-		if arg1 and not issecret(arg1) and reactiveById[arg1] then reactiveById[arg1].glow = nil
-		elseif not arg1 or issecret(arg1) then for _, r in ipairs(reactives) do r.glow = nil end end
-		queueScan()
+		local wantP, wantR = false, false
+		if HAS_BIG and (not arg1 or issecret(arg1) or CC_SET[arg1] or spellName(arg1) == CC_NAME) then
+			overlayCC = false
+			wantP = true
+		end
+		if arg1 and not issecret(arg1) and reactiveById[arg1] then
+			reactiveById[arg1].glow = nil
+			wantR = true
+		elseif not arg1 or issecret(arg1) then
+			for i = 1, #reactives do reactives[i].glow = nil end
+			wantR = #reactives > 0
+		end
+		if wantP or wantR then queueScan(wantP, false, wantR) end
 	elseif event == "PLAYER_TARGET_CHANGED" then
 		targetBaseline = true
-		knownTarget = {}
-		for j = #procs, 1, -1 do if procs[j].target then table.remove(procs, j) end end
-		drawProcs()
-		queueScan()
+		wipe(knownTarget)
+		local removed = false
+		for j = #procs, 1, -1 do
+			if procs[j].target then
+				table.remove(procs, j)
+				removed = true
+			end
+		end
+		if removed then drawProcs() end
+		if db.procs and db.targetProcs and UnitExists("target") then
+			queueScan(false, true, false)
+		end
 	elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
 		if arg3 and not issecret(arg3) then
 			local name = spellName(arg3)
