@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.3
 
 - Lower raid and combat CPU usage: player buffs, target debuffs and reactive abilities are scanned independently on dirty flags instead of running a full scan on every target aura change; hidden Clearcasting checks only run for classes with a big proc and when enabled, with pre-cached probe spells and reused scratch tables.
 - Fixed: switching Warrior stances (`SPELLS_CHANGED`) no longer resets reactive ability tracking (Overpower, Revenge); repeated preview clicks no longer duplicate preview icons or interfere with real Clearcasting/Crusader procs; simultaneous procs no longer clip sounds; target debuff refreshes are deduplicated and counted properly.
