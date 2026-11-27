@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Settings window: "More from Bencepo" button in the footer links to all Bencepo addons (BencepoUI 6).
+
 ## 1.0.3
 
 - Lower raid and combat CPU usage: player buffs, target debuffs and reactive abilities are scanned independently on dirty flags instead of running a full scan on every target aura change; hidden Clearcasting checks only run for classes with a big proc and when enabled, with pre-cached probe spells and reused scratch tables.
