@@ -14,7 +14,13 @@
 -- Procs you do not care about are muted in the move mode with a right-click.
 
 local ADDON = ...
+local floor, min, max, huge = math.floor, math.min, math.max, math.huge
+local format = string.format
+local tinsert, tremove, tsort = table.insert, table.remove, table.sort
+local ipairs, pairs, pcall, tonumber, tostring, type, wipe = ipairs, pairs, pcall, tonumber, tostring, type, wipe
+local GetTime, time = GetTime, time
 local issecret = issecretvalue or function() return false end
+local PREFIX = "|cff4fb3ffProcFlare:|r "
 
 local DEFAULTS = {
 	clearcasting = true, -- Clearcasting alert
@@ -135,7 +141,7 @@ local function playSound(id, force)
 	local channel = (db and db.channel) or "SFX"
 	if SOUND_FILES[id] then
 		local v = (db and tonumber(db.volume)) or 100
-		v = math.max(25, math.min(100, math.floor((v + 12) / 25) * 25))
+		v = max(25, min(100, floor((v + 12) / 25) * 25))
 		PlaySoundFile("Interface\\AddOns\\ProcFlare\\Sounds\\" .. SOUND_FILES[id] .. "_" .. v .. ".ogg", channel)
 	elseif id > 0 then
 		PlaySound(id, channel)
@@ -151,8 +157,8 @@ local function guessPack()
 	if tree and GetTalentTabInfo then
 		local best, bestPoints = nil, 0
 		for i = 1, 3 do
-			local r = { pcall(GetTalentTabInfo, i) }
-			local points = r[1] and ((type(r[4]) == "number" and r[4]) or (type(r[6]) == "number" and r[6])) or 0
+			local ok, _, _, p4, _, p6 = pcall(GetTalentTabInfo, i)
+			local points = ok and ((type(p4) == "number" and p4) or (type(p6) == "number" and p6)) or 0
 			if not issecret(points) and points > bestPoints then best, bestPoints = i, points end
 		end
 		if best == tree then return 1 end
@@ -201,7 +207,7 @@ cc.glow:SetPoint("CENTER")
 cc.glow:SetSize(124, 124)
 cc.label = cc:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 cc.label:SetPoint("TOP", cc, "BOTTOM", 0, -4)
-cc.label:SetTextColor(math.min(BIG_COLOR[1] + 0.1, 1), math.min(BIG_COLOR[2] + 0.05, 1), 1)
+cc.label:SetTextColor(min(BIG_COLOR[1] + 0.1, 1), min(BIG_COLOR[2] + 0.05, 1), 1)
 cc.label:SetText(CC_NAME)
 cc.time = cc:CreateFontString(nil, "OVERLAY", "NumberFontNormalLarge")
 cc.time:SetPoint("BOTTOMRIGHT", -2, 2)
@@ -257,6 +263,8 @@ local function toggleMute(spellId)
 	if refreshMoveMode then refreshMoveMode() end
 end
 
+local function hideTooltip() GameTooltip:Hide() end
+
 for i = 1, MAX_PROCS do
 	local f = CreateFrame("Frame", nil, anchor)
 	f:SetSize(36, 36)
@@ -288,7 +296,7 @@ for i = 1, MAX_PROCS do
 		GameTooltip:AddLine(db.muted[self.spellId] and "Muted. Right-click: unmute" or "Right-click: mute", 0.8, 0.8, 0.8)
 		GameTooltip:Show()
 	end)
-	f:SetScript("OnLeave", function() GameTooltip:Hide() end)
+	f:SetScript("OnLeave", hideTooltip)
 	slots[i] = f
 end
 
@@ -389,11 +397,11 @@ local function buildCounter()
 		GameTooltip:AddLine("Drag: move. Right-click: start a new count.", 0.8, 0.8, 0.8, true)
 		GameTooltip:Show()
 	end)
-	f:SetScript("OnLeave", function() GameTooltip:Hide() end)
+	f:SetScript("OnLeave", hideTooltip)
 	counterFrame = f
 end
 
-local counterIds, counterList = {}, {}
+local counterIds, counterList, counterPool = {}, {}, {}
 local function sortCounter(a, b)
 	if a.cur ~= b.cur then return a.cur > b.cur end
 	if a.last ~= b.last then return a.last > b.last end
@@ -411,11 +419,19 @@ drawCounter = function()
 	wipe(counterList)
 	for id in pairs(fight) do counterIds[id] = true end
 	for id in pairs(lastFight) do counterIds[id] = true end
+	local total = 0
 	for id in pairs(counterIds) do
-		counterList[#counterList + 1] = { id = id, cur = fight[id] or 0, last = lastFight[id] or 0 }
+		total = total + 1
+		local e = counterPool[total]
+		if not e then
+			e = {}
+			counterPool[total] = e
+		end
+		e.id, e.cur, e.last = id, fight[id] or 0, lastFight[id] or 0
+		counterList[total] = e
 	end
-	table.sort(counterList, sortCounter)
-	local n = math.min(#counterList, COUNTER_ROWS)
+	tsort(counterList, sortCounter)
+	local n = min(total, COUNTER_ROWS)
 	for i = 1, COUNTER_ROWS do
 		local r, e = counterFrame.rows[i], counterList[i]
 		if e and i <= n then
@@ -429,7 +445,7 @@ drawCounter = function()
 		end
 	end
 	counterFrame.empty:SetShown(n == 0)
-	counterFrame:SetHeight(26 + math.max(n, 1) * 17)
+	counterFrame:SetHeight(26 + max(n, 1) * 17)
 	counterFrame:Show()
 end
 
@@ -451,7 +467,7 @@ local function remember(spellId)
 	countProc(spellId)
 	db.seen[spellId] = time()
 	-- keep the 12 newest
-	local n, oldest, oldestT = 0, nil, math.huge
+	local n, oldest, oldestT = 0, nil, huge
 	for id, t in pairs(db.seen) do
 		n = n + 1
 		if t < oldestT then oldest, oldestT = id, t end
@@ -523,7 +539,7 @@ end
 
 -- A new proc goes first in the row; the oldest drops off when the row is full.
 local function pushProc(p)
-	table.insert(procs, 1, p)
+	tinsert(procs, 1, p)
 	procs[MAX_PROCS + 1] = nil
 end
 
@@ -673,7 +689,7 @@ end
 local lastSource
 local function debugCC(source)
 	if db.debug and source ~= lastSource then
-		print("|cff4fb3ffProcFlare:|r Clearcasting " .. (source and ("on (" .. source .. ")") or "off"))
+		print(PREFIX .. "Clearcasting " .. (source and ("on (" .. source .. ")") or "off"))
 	end
 	lastSource = source
 end
@@ -931,7 +947,7 @@ driver:SetScript("OnUpdate", function(self, elapsed)
 	end
 	if ccState then
 		local e = ccState.expires
-		local sec = (e and e > now) and math.floor(e - now + 0.5) or -1
+		local sec = (e and e > now) and floor(e - now + 0.5) or -1
 		if sec ~= ccLastSec then
 			ccLastSec = sec
 			cc.time:SetText(sec >= 0 and tostring(sec) or "")
@@ -948,7 +964,7 @@ driver:SetScript("OnUpdate", function(self, elapsed)
 			local p, f = procs[i], slots[i]
 			local e = p.expires
 			if e and e > now then
-				f.time:SetText(string.format("%.1f", e - now))
+				f.time:SetText(format("%.1f", e - now))
 				f.hadTime = true
 			elseif f.hadTime then
 				f.time:SetText("")
@@ -965,12 +981,13 @@ local function previewSound()
 end
 
 local function preview()
-	previewUntil = GetTime() + 6
+	local now = GetTime()
+	previewUntil = now + 6
 	for j = #procs, 1, -1 do
-		if procs[j].preview then table.remove(procs, j) end
+		if procs[j].preview then tremove(procs, j) end
 	end
-	showCC({ auraInstanceID = -1, expirationTime = GetTime() + 15, applications = 1, icon = spellIcon(BIG_PROC.id) }, true)
-	pushProc({ id = -2, spellId = PREVIEW_PROC, icon = spellIcon(PREVIEW_PROC), expires = GetTime() + 15, preview = true })
+	showCC({ auraInstanceID = -1, expirationTime = now + 15, applications = 1, icon = spellIcon(BIG_PROC.id) }, true)
+	pushProc({ id = -2, spellId = PREVIEW_PROC, icon = spellIcon(PREVIEW_PROC), expires = now + 15, preview = true })
 	drawProcs()
 	if not moving then slots[1].pop:Play() end
 	C_Timer.After(0.6, previewSound)
@@ -979,18 +996,40 @@ end
 
 -- Move mode: the frame can be dragged, and the procs seen recently are shown
 -- as icons; right-click mutes or unmutes one.
+local moveList, movePool = {}, {}
+local function addMoveEntry(n, id, t)
+	local e = movePool[n]
+	if not e then
+		e = {}
+		movePool[n] = e
+	end
+	e.id, e.t = id, t
+	moveList[n] = e
+end
+local function sortMoveByTime(a, b) return a.t > b.t end
+
 refreshMoveMode = function()
 	if not moving then return end
-	local list = {}
-	for id, t in pairs(db.seen) do list[#list + 1] = { id = id, t = t } end
-	for id in pairs(db.muted) do
-		if not db.seen[id] then list[#list + 1] = { id = id, t = 0 } end
+	wipe(moveList)
+	local count = 0
+	for id, t in pairs(db.seen) do
+		count = count + 1
+		addMoveEntry(count, id, t)
 	end
-	table.sort(list, function(a, b) return a.t > b.t end)
-	if #list == 0 then list[1] = { id = PREVIEW_PROC } end
-	local n = math.min(#list, MAX_PROCS)
+	for id in pairs(db.muted) do
+		if not db.seen[id] then
+			count = count + 1
+			addMoveEntry(count, id, 0)
+		end
+	end
+	tsort(moveList, sortMoveByTime)
+	if count == 0 then
+		addMoveEntry(1, PREVIEW_PROC, 0)
+		count = 1
+	end
+	local n = min(count, MAX_PROCS)
 	for i = 1, MAX_PROCS do
-		local f, e = slots[i], list[i]
+		local f, e = slots[i], moveList[i]
 		if e then
 			f.spellId = e.id
 			f.icon:SetTexture(spellIcon(e.id))
@@ -1131,10 +1170,15 @@ local function buildWindow()
 	reset:SetPoint("TOPLEFT", L, -476)
 end
 
-local function openOptions()
-	if not db then return end
+local function ensureWindow()
+	if not db then return nil end
 	if not win then buildWindow() end
-	win:Toggle()
+	return win
+end
+
+local function openOptions()
+	local w = ensureWindow()
+	if w then w:Toggle() end
 end
 
 -- The game's options only point to the window, so ProcFlare is still found there.
@@ -1144,9 +1188,8 @@ local function registerSettings()
 	if layoutCat and CreateSettingsButtonInitializer then
 		layoutCat:AddInitializer(CreateSettingsButtonInitializer("ProcFlare has its own window", "Open", function()
 			if SettingsPanel and SettingsPanel:IsShown() then HideUIPanel(SettingsPanel) end
-			if not db then return end
-			if not win then buildWindow() end
-			win:Show()
+			local w = ensureWindow()
+			if w then w:Show() end
 		end, "Opens the ProcFlare window. It can be dragged anywhere and stays open while you play.", true))
 	end
 	Settings.RegisterAddOnCategory(category)
@@ -1192,7 +1235,7 @@ SlashCmdList.PROCFLARE = function(msg)
 	if msg == "test" then preview()
 	elseif msg == "debug" then
 		db.debug = not db.debug
-		print("|cff4fb3ffProcFlare:|r debug " .. (db.debug and "on" or "off"))
+		print(PREFIX .. "debug " .. (db.debug and "on" or "off"))
 	elseif msg == "move" then setMoving(not moving)
 	elseif msg == "reset" then newFight()
 	elseif msg == "counter" then db.counter = not db.counter; drawCounter(); if win then win:Refresh() end
@@ -1202,6 +1245,15 @@ end
 ---------------------------------------------------------------- events
 local HAS_PROBES = (PROBES[CLASS] ~= nil) or (CAST_PROBES[CLASS] ~= nil)
 local HAS_USABLE_CLASS = HAS_PROBES or (REACTIVE[CLASS] ~= nil)
+local UNTOUCHED_SOUNDS = { [8959] = true, [3175] = true, [-1] = true, [-2] = true }
+
+local function pickInitialPack()
+	if db.packPicked then return end
+	db.packPicked = true
+	db.pack = guessPack()
+	if UNTOUCHED_SOUNDS[db.ccSound] then db.ccSound = PACKS[db.pack].cc end
+	if UNTOUCHED_SOUNDS[db.procSound] then db.procSound = PACKS[db.pack].proc end
+end
 
 local scanQueued = false
 local dirtyPlayer, dirtyTarget, dirtyReactive = false, false, false
@@ -1212,7 +1264,7 @@ local function runQueuedScan()
 	local dp, dt, dr = dirtyPlayer, dirtyTarget, dirtyReactive
 	dirtyPlayer, dirtyTarget, dirtyReactive = false, false, false
 	local ok, err = pcall(scan, dp, dt, dr)
-	if not ok and db and db.debug then print("|cff4fb3ffProcFlare:|r " .. tostring(err)) end
+	if not ok and db and db.debug then print(PREFIX .. tostring(err)) end
 end
 
 local function queueScan(p, t, r)
@@ -1284,14 +1336,7 @@ events:SetScript("OnEvent", function(self, event, arg1, _, arg3)
 		queueScan(true, true, true)
 		-- 0.2.0: pick the sound pack once from class and talents, unless sounds were picked by hand.
 		if not db.packPicked then
-			C_Timer.After(3, function()
-				if db.packPicked then return end
-				db.packPicked = true
-				db.pack = guessPack()
-				local untouched = { [8959] = true, [3175] = true, [-1] = true, [-2] = true }
-				if untouched[db.ccSound] then db.ccSound = PACKS[db.pack].cc end
-				if untouched[db.procSound] then db.procSound = PACKS[db.pack].proc end
-			end)
+			C_Timer.After(3, pickInitialPack)
 		end
 	elseif event == "UNIT_AURA" then
 		if arg1 == "target" then
@@ -1310,7 +1355,7 @@ events:SetScript("OnEvent", function(self, event, arg1, _, arg3)
 			C_Timer.After(0.1, runUsableScan)
 		end
 	elseif event == "SPELL_ACTIVATION_OVERLAY_SHOW" or event == "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW" then
-		if db.debug then print("|cff4fb3ffProcFlare:|r " .. event .. " " .. tostring(not issecret(arg1) and arg1 or "?")) end
+		if db.debug then print(PREFIX .. event .. " " .. tostring(not issecret(arg1) and arg1 or "?")) end
 		local wantP, wantR = false, false
 		if HAS_BIG and arg1 and not issecret(arg1) and (CC_SET[arg1] or spellName(arg1) == CC_NAME) then
 			overlayCC = true
@@ -1341,7 +1386,7 @@ events:SetScript("OnEvent", function(self, event, arg1, _, arg3)
 		local removed = false
 		for j = #procs, 1, -1 do
 			if procs[j].target then
-				table.remove(procs, j)
+				tremove(procs, j)
 				removed = true
 			end
 		end
